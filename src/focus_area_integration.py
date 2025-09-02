@@ -464,11 +464,25 @@ def integrate_focus_areas(data_path: str = "data/") -> Dict[str, pd.DataFrame]:
                     original_df, results['services_enhanced'], skills_df
                 )
                 # Merge Focus Areas to deduplicated resources
-                if 'resource_name' in temp_df.columns and 'Focus_Areas' in temp_df.columns:
-                    fa_mapping = temp_df[['resource_name', 'Focus_Areas']].drop_duplicates('resource_name')
-                    resources_df = resources_df.merge(fa_mapping, on='resource_name', how='left')
+                # Handle column name differences (Resource_Name vs resource_name)
+                if 'Resource_Name' in temp_df.columns:
+                    temp_df['resource_name'] = temp_df['Resource_Name'].str.lower().str.strip()
+                
+                if 'resource_name' not in resources_df.columns:
+                    print("ERROR: resource_name column missing in deduplicated data")
+                    resources_df['Focus_Areas'] = None
+                elif 'Focus_Areas' in temp_df.columns:
+                    # Normalize names for matching
+                    resources_df['resource_name_normalized'] = resources_df['resource_name'].str.lower().str.strip()
+                    temp_df['resource_name_normalized'] = temp_df['resource_name'].str.lower().str.strip()
+                    
+                    # Get unique Focus Areas per resource
+                    fa_mapping = temp_df[['resource_name_normalized', 'Focus_Areas']].drop_duplicates('resource_name_normalized')
+                    
+                    # Merge on normalized names
+                    resources_df = resources_df.merge(fa_mapping, on='resource_name_normalized', how='left')
+                    resources_df.drop('resource_name_normalized', axis=1, inplace=True)
                 else:
-                    # If columns don't match, just use deduplicated count
                     resources_df['Focus_Areas'] = None
                 results['resources_with_focus'] = resources_df
                 logger.info(f"Linked {len(resources_df)} unique resources to Focus Areas")
