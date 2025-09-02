@@ -176,9 +176,10 @@ def show_revenue_based_planning(coverage_df, resources_df):
             values=list(risk_categories.values()),
             marker_colors=['#28a745', '#ffc107', '#ff8c00', '#dc3545'],
             hole=0.4,
-            textinfo='label+value',
-            texttemplate='%{label}<br>$%{value:.1f}M',
+            text=[f"${v:.0f}M" for v in risk_categories.values()],
+            textinfo='label+text',
             textfont=dict(size=12, color='white', family='Arial Bold'),
+            hovertemplate='<b>%{label}</b><br>Revenue: $%{value:.1f}M<br>%{percent}<extra></extra>',
             showlegend=False
         ),
         row=2, col=1
@@ -193,13 +194,12 @@ def show_revenue_based_planning(coverage_df, resources_df):
     
     fig.add_trace(
         go.Bar(
-            x=top_roi['ROI_Score'],
-            y=roi_display_names,
+            x=top_roi['ROI_Score'].tolist(),
+            y=roi_display_names.tolist(),
             orientation='h',
             marker_color='#667eea',
-            text=top_roi['ROI_Score'],
+            text=[f"{score:.1f}" for score in top_roi['ROI_Score']],
             textposition='outside',
-            texttemplate='%{text:.1f}',
             textfont=dict(size=11),
             hovertemplate='<b>%{y}</b><br>ROI Score: %{x:.1f}<extra></extra>',
             name='ROI Score',
