@@ -201,11 +201,11 @@ def show_revenue_based_planning(coverage_df, resources_df):
     )
     
     # Update layout with larger fonts for better readability
-    fig.update_xaxes(title_text="Revenue Potential ($M)", title_font=dict(size=14), tickfont=dict(size=12), row=1, col=1)
-    fig.update_yaxes(title_text="Current Resources", title_font=dict(size=14), tickfont=dict(size=12), row=1, col=1)
-    fig.update_xaxes(title_text="Resource Gap", title_font=dict(size=14), tickfont=dict(size=12), row=1, col=2)
+    fig.update_xaxes(title=dict(text="Revenue Potential ($M)", font=dict(size=14)), tickfont=dict(size=12), row=1, col=1)
+    fig.update_yaxes(title=dict(text="Current Resources", font=dict(size=14)), tickfont=dict(size=12), row=1, col=1)
+    fig.update_xaxes(title=dict(text="Resource Gap", font=dict(size=14)), tickfont=dict(size=12), row=1, col=2)
     fig.update_yaxes(tickfont=dict(size=11), row=1, col=2)
-    fig.update_xaxes(title_text="ROI Score", title_font=dict(size=14), tickfont=dict(size=12), row=2, col=2)
+    fig.update_xaxes(title=dict(text="ROI Score", font=dict(size=14)), tickfont=dict(size=12), row=2, col=2)
     fig.update_yaxes(tickfont=dict(size=11), row=2, col=2)
     
     fig.update_layout(
@@ -300,8 +300,8 @@ def show_current_vs_required(coverage_df):
     fig.update_layout(
         title=dict(text="Resource Requirements vs Revenue Opportunity", font=dict(size=18)),
         barmode='stack',
-        yaxis=dict(title="Number of Resources", titlefont=dict(size=14), tickfont=dict(size=12)),
-        yaxis2=dict(title="Revenue ($M)", titlefont=dict(size=14), tickfont=dict(size=12), overlaying='y', side='right'),
+        yaxis=dict(title=dict(text="Number of Resources", font=dict(size=14)), tickfont=dict(size=12)),
+        yaxis2=dict(title=dict(text="Revenue ($M)", font=dict(size=14)), tickfont=dict(size=12), overlaying='y', side='right'),
         xaxis=dict(tickangle=-45, tickfont=dict(size=11)),
         height=600,
         hovermode='x unified',

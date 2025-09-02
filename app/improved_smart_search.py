@@ -244,9 +244,14 @@ def show_improved_smart_search(data):
                             st.progress(domain_score / match['score'] if match['score'] > 0 else 0)
                             st.caption(f"Domain match: {domain_score} pts")
                     
-                    # Full skills preview (collapsible)
-                    with st.expander("View All Skills"):
-                        st.text(match['all_skills'])
+                    # Full skills preview
+                    st.markdown("### 📄 All Skills")
+                    with st.container():
+                        skills_text = match['all_skills']
+                        if len(skills_text) > 500:
+                            st.text_area("", value=skills_text, height=100, disabled=True, key=f"skills_{i}")
+                        else:
+                            st.info(skills_text)
         else:
             st.warning(f"No matches found for '{search_query}'. Try different search terms.")
             
