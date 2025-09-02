@@ -632,11 +632,15 @@ def main():
                                      labels=['1-5', '6-10', '11-15', '16-20', '20+'])
                 skill_dist = skill_ranges.value_counts().sort_index()
                 
+                # Convert to list for proper display
+                x_values = [str(i) for i in skill_dist.index.tolist()]
+                y_values = skill_dist.values.tolist()
+                
                 fig = go.Figure(go.Bar(
-                    x=skill_dist.index,
-                    y=skill_dist.values,
+                    x=x_values,
+                    y=y_values,
                     marker_color='#28a745',
-                    text=skill_dist.values,
+                    text=y_values,
                     textposition='outside'
                 ))
                 fig.update_layout(
@@ -645,7 +649,7 @@ def main():
                     yaxis_title="Number of Professionals",
                     height=300
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="skill_dist_chart")
             
             with col2:
                 # Rating distribution
@@ -654,9 +658,13 @@ def main():
                                       labels=['Poor (0-2)', 'Fair (2-3)', 'Good (3-4)', 'Excellent (4-5)'])
                 rating_dist = rating_ranges.value_counts()
                 
+                # Convert to lists for proper display
+                labels_list = [str(i) for i in rating_dist.index.tolist()]
+                values_list = rating_dist.values.tolist()
+                
                 fig = go.Figure(go.Pie(
-                    values=rating_dist.values,
-                    labels=rating_dist.index,
+                    values=values_list,
+                    labels=labels_list,
                     hole=0.4,
                     marker_colors=['#dc3545', '#ffc107', '#28a745', '#007bff']
                 ))
@@ -664,7 +672,7 @@ def main():
                     title="Proficiency Distribution",
                     height=300
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="rating_dist_chart")
     
     with tab6:
         st.header("📋 Reports & Export")
