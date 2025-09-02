@@ -321,16 +321,23 @@ class FocusAreaIntegrator:
         return resources_df
     
     def calculate_focus_area_coverage(self, resources_df: pd.DataFrame) -> pd.DataFrame:
-        """Calculate resource coverage for each Focus Area."""
+        """Calculate resource coverage for each Focus Area - using unique resources only."""
         coverage_data = []
         
+        # First, get unique resources if we have duplicate records
+        if 'resource_name' in resources_df.columns:
+            unique_resources = resources_df.groupby('resource_name').first().reset_index()
+        else:
+            unique_resources = resources_df
+        
         for fa in self.focus_areas:
-            # Count resources with this Focus Area
-            if 'Focus_Areas' in resources_df.columns:
-                matching = resources_df[
-                    resources_df['Focus_Areas'].str.contains(fa, na=False, case=False)
+            # Count unique resources with this Focus Area
+            if 'Focus_Areas' in unique_resources.columns:
+                # Use regex=False to avoid regex interpretation issues
+                matching = unique_resources[
+                    unique_resources['Focus_Areas'].str.contains(fa, na=False, case=False, regex=False)
                 ]
-                resource_count = matching['Resource_Name'].nunique() if 'Resource_Name' in matching.columns else len(matching)
+                resource_count = len(matching)
             else:
                 resource_count = 0
             
@@ -442,16 +449,40 @@ def integrate_focus_areas(data_path: str = "data/") -> Dict[str, pd.DataFrame]:
             logger.info(f"Enhanced {len(services_df)} services with Focus Areas")
             logger.info(f"Unique Focus Areas in services: {services_df['FY25 Focus Area'].nunique()}")
         
-        # Process resources
-        details_path = Path(data_path) / "DETAILS (28).xlsx"
-        if details_path.exists() and 'services_enhanced' in results:
-            resources_df = pd.read_excel(details_path)
-            skills_df = pd.read_excel(Path(data_path) / "Skillsets_to_Skills_mapping.xlsx")
-            resources_df = integrator.link_resources_to_focus_areas(
-                resources_df, results['services_enhanced'], skills_df
-            )
-            results['resources_with_focus'] = resources_df
-            logger.info(f"Linked {len(resources_df)} resources to Focus Areas")
+        # Process resources - try to use deduplicated data first
+        dedup_path = Path("data_processed") / "resources_deduplicated.parquet"
+        if dedup_path.exists() and 'services_enhanced' in results:
+            # Use deduplicated resources
+            resources_df = pd.read_parquet(dedup_path)
+            # Still load original for skill mapping
+            details_path = Path(data_path) / "DETAILS (28).xlsx"
+            if details_path.exists():
+                original_df = pd.read_excel(details_path)
+                skills_df = pd.read_excel(Path(data_path) / "Skillsets_to_Skills_mapping.xlsx")
+                # Link using original data for skill mapping
+                temp_df = integrator.link_resources_to_focus_areas(
+                    original_df, results['services_enhanced'], skills_df
+                )
+                # Merge Focus Areas to deduplicated resources
+                if 'resource_name' in temp_df.columns and 'Focus_Areas' in temp_df.columns:
+                    fa_mapping = temp_df[['resource_name', 'Focus_Areas']].drop_duplicates('resource_name')
+                    resources_df = resources_df.merge(fa_mapping, on='resource_name', how='left')
+                else:
+                    # If columns don't match, just use deduplicated count
+                    resources_df['Focus_Areas'] = None
+                results['resources_with_focus'] = resources_df
+                logger.info(f"Linked {len(resources_df)} unique resources to Focus Areas")
+        else:
+            # Fallback to original processing
+            details_path = Path(data_path) / "DETAILS (28).xlsx"
+            if details_path.exists() and 'services_enhanced' in results:
+                resources_df = pd.read_excel(details_path)
+                skills_df = pd.read_excel(Path(data_path) / "Skillsets_to_Skills_mapping.xlsx")
+                resources_df = integrator.link_resources_to_focus_areas(
+                    resources_df, results['services_enhanced'], skills_df
+                )
+                results['resources_with_focus'] = resources_df
+                logger.info(f"Linked {len(resources_df)} resources to Focus Areas")
         
         # Calculate coverage
         if 'resources_with_focus' in results:

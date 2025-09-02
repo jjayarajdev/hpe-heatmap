@@ -410,8 +410,14 @@ def show_focus_area_deep_dive(coverage_df, data):
                 resources_df['Focus_Areas'].str.contains(selected_fa, na=False, case=False, regex=False)
             ]
             
+            # Get unique resources
+            if 'resource_name' in matching.columns:
+                unique_resources = matching['resource_name'].nunique()
+            else:
+                unique_resources = len(matching.drop_duplicates())
+            
             if len(matching) > 0:
-                st.success(f"✅ Found {len(matching)} matching skill instances")
+                st.success(f"✅ Found {unique_resources} unique professionals with relevant skills")
                 
                 # Show skill distribution
                 if 'Rating' in matching.columns:
