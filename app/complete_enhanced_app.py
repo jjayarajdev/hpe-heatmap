@@ -588,21 +588,35 @@ def main():
                 col1, col2 = st.columns([2, 1])
                 
                 with col1:
-                    # Create sunburst or treemap for better hierarchy
+                    # Create treemap with proper formatting
+                    labels = [str(city) for city in city_counts.index]
+                    values = city_counts.values.tolist()
+                    
+                    # Create custom text for each box
+                    custom_text = []
+                    for city, count in zip(labels, values):
+                        pct = (count / total_resources) * 100
+                        custom_text.append(f"{city}<br>{count} professionals<br>{pct:.1f}%")
+                    
                     fig = go.Figure(go.Treemap(
-                        labels=city_counts.index,
-                        parents=[""] * len(city_counts),
-                        values=city_counts.values,
-                        text=[f"{city}<br>{count} resources" for city, count in city_counts.items()],
-                        textinfo="label+value+percent root",
-                        marker=dict(colorscale='Blues', line=dict(width=2))
+                        labels=labels,
+                        parents=[""] * len(labels),
+                        values=values,
+                        text=custom_text,
+                        textinfo="text",
+                        marker=dict(
+                            colorscale='Blues',
+                            cmid=sum(values)/len(values),
+                            line=dict(width=2, color='white')
+                        ),
+                        hovertemplate='<b>%{label}</b><br>Resources: %{value}<br>%{text}<extra></extra>'
                     ))
                     fig.update_layout(
                         title=dict(text="Resource Distribution by Location", font=dict(size=16)),
                         height=400,
                         margin=dict(t=50, l=0, r=0, b=0)
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key="geo_dist_treemap")
                 
                 with col2:
                     st.markdown("**Geographic Insights:**")
@@ -614,11 +628,12 @@ def main():
                     if concentration > 80:
                         st.warning(f"⚠️ High concentration: {concentration:.1f}% of resources in top 3 cities")
                     else:
-                        st.success(f"✅ Good distribution: {concentration:.1f}% in top 3 cities")
+                        st.info(f"🌍 High concentration: {concentration:.1f}% of resources in top 3 cities")
                     
                     st.markdown("**Top Locations:**")
                     for city, count in city_counts.head(5).items():
-                        st.markdown(f"• **{city}**: {count} ({count/total_resources*100:.1f}%)")
+                        city_pct = (count / total_resources) * 100
+                        st.markdown(f"• **{city}**: {count} ({city_pct:.1f}%)")
             
             # Skills distribution analysis
             st.markdown("### 🎯 Skills Distribution Analysis")

@@ -269,11 +269,11 @@ def show_skill_gap_analysis(dashboard_data):
     gap_df = pd.DataFrame(gaps)
     fig.add_trace(
         go.Bar(
-            x=gap_df['skill'],
-            y=gap_df['gap'],
+            x=gap_df['skill'].tolist(),
+            y=gap_df['gap'].tolist(),
             marker_color=['#dc3545' if s == 'Critical' else '#ffc107' if s == 'High' else '#28a745' 
                          for s in gap_df['severity']],
-            text=gap_df['gap'],
+            text=gap_df['gap'].tolist(),
             textposition='outside',
             name="Gap Size"
         ),
@@ -284,8 +284,8 @@ def show_skill_gap_analysis(dashboard_data):
     severity_counts = gap_df['severity'].value_counts()
     fig.add_trace(
         go.Pie(
-            labels=severity_counts.index,
-            values=severity_counts.values,
+            labels=severity_counts.index.tolist(),
+            values=severity_counts.values.tolist(),
             marker_colors=['#dc3545', '#ffc107', '#28a745'],
             hole=0.4
         ),
@@ -296,8 +296,8 @@ def show_skill_gap_analysis(dashboard_data):
     gap_df['coverage_pct'] = (gap_df['actual'] / gap_df['required'] * 100).round(1)
     fig.add_trace(
         go.Bar(
-            x=gap_df['skill'],
-            y=gap_df['coverage_pct'],
+            x=gap_df['skill'].tolist(),
+            y=gap_df['coverage_pct'].tolist(),
             marker_color='#667eea',
             text=[f"{pct:.1f}%" for pct in gap_df['coverage_pct']],
             textposition='outside',
@@ -312,16 +312,16 @@ def show_skill_gap_analysis(dashboard_data):
     
     fig.add_trace(
         go.Scatter(
-            x=gap_df['effort'],
-            y=gap_df['impact'],
+            x=gap_df['effort'].tolist(),
+            y=gap_df['impact'].tolist(),
             mode='markers+text',
             marker=dict(
-                size=gap_df['gap']*2,
-                color=gap_df['gap'],
+                size=(gap_df['gap']*2).tolist(),
+                color=gap_df['gap'].tolist(),
                 colorscale='Reds',
                 showscale=True
             ),
-            text=gap_df['skill'],
+            text=gap_df['skill'].tolist(),
             textposition="top center",
             name="Skills"
         ),
@@ -336,7 +336,7 @@ def show_skill_gap_analysis(dashboard_data):
     fig.update_yaxes(title_text="Coverage %", row=2, col=1)
     fig.update_yaxes(title_text="Business Impact", row=2, col=2)
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key="skill_gap_analysis_chart")
     
     # Action plan table
     st.markdown("### 📋 Skill Gap Action Plan")
@@ -387,7 +387,7 @@ def show_demand_forecasting(dashboard_data):
     
     # Current baseline
     fig.add_trace(go.Scatter(
-        x=proj_df['month'],
+        x=proj_df['month'].tolist(),
         y=[forecast['current_resources']] * len(proj_df),
         mode='lines',
         line=dict(dash='dash', color='gray'),
@@ -396,8 +396,8 @@ def show_demand_forecasting(dashboard_data):
     
     # Projected need
     fig.add_trace(go.Scatter(
-        x=proj_df['month'],
-        y=proj_df['projected_need'],
+        x=proj_df['month'].tolist(),
+        y=proj_df['projected_need'].tolist(),
         mode='lines+markers',
         line=dict(color='#667eea', width=3),
         marker=dict(size=8),
@@ -449,15 +449,15 @@ def show_demand_forecasting(dashboard_data):
         
         fig.add_trace(go.Bar(
             name='Current',
-            x=domain_df['Domain'],
-            y=domain_df['Current'],
+            x=domain_df['Domain'].tolist(),
+            y=domain_df['Current'].tolist(),
             marker_color='#98fb98'
         ))
         
         fig.add_trace(go.Bar(
             name='Additional Needed',
-            x=domain_df['Domain'],
-            y=domain_df['Gap'],
+            x=domain_df['Domain'].tolist(),
+            y=domain_df['Gap'].tolist(),
             marker_color='#ffd700'
         ))
         
