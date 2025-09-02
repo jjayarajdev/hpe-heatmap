@@ -1,4 +1,4 @@
-# HPE Resource Assignment System - Production Pipeline
+# HPE Talent Intelligence Platform
 
 A comprehensive, production-grade ML pipeline for intelligent resource assignment, service classification, and bidirectional taxonomy management.
 
