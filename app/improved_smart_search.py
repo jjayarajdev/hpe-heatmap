@@ -249,7 +249,7 @@ def show_improved_smart_search(data):
                     with st.container():
                         skills_text = match['all_skills']
                         if len(skills_text) > 500:
-                            st.text_area("", value=skills_text, height=100, disabled=True, key=f"skills_{i}")
+                            st.text_area("Skills", value=skills_text, height=100, disabled=True, key=f"skills_{i}", label_visibility="collapsed")
                         else:
                             st.info(skills_text)
         else:

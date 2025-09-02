@@ -144,15 +144,19 @@ def show_revenue_based_planning(coverage_df, resources_df):
     top_gaps = coverage_df.nlargest(10, 'Gap')
     colors = ['#dc3545' if gap > 10 else '#ffc107' if gap > 5 else '#28a745' for gap in top_gaps['Gap']]
     
+    # Truncate and clean Focus Area names for display
+    display_names = top_gaps['Focus_Area'].apply(lambda x: str(x)[:25] + '...' if len(str(x)) > 25 else str(x))
+    
     fig.add_trace(
         go.Bar(
             x=top_gaps['Gap'],
-            y=top_gaps['Focus_Area'].str[:25],
+            y=display_names,
             orientation='h',
             marker_color=colors,
             text=top_gaps['Gap'],
             textposition='outside',
-            hovertemplate='%{y}<br>Gap: %{x} resources<extra></extra>',
+            hovertemplate='<b>%{y}</b><br>Gap: %{x} resources<extra></extra>',
+            name='Resource Gap',
             showlegend=False
         ),
         row=1, col=2
@@ -181,20 +185,24 @@ def show_revenue_based_planning(coverage_df, resources_df):
     )
     
     # 4. ROI Potential
-    coverage_df['ROI_Score'] = (coverage_df['Revenue_Potential'] / (coverage_df['Gap'] + 1)).round(1)
+    coverage_df['ROI_Score'] = (coverage_df['Revenue_Potential'] / (coverage_df['Gap'].abs() + 1)).round(1)
     top_roi = coverage_df.nlargest(10, 'ROI_Score')
+    
+    # Truncate and clean Focus Area names for display
+    roi_display_names = top_roi['Focus_Area'].apply(lambda x: str(x)[:25] + '...' if len(str(x)) > 25 else str(x))
     
     fig.add_trace(
         go.Bar(
             x=top_roi['ROI_Score'],
-            y=top_roi['Focus_Area'].str[:25],
+            y=roi_display_names,
             orientation='h',
             marker_color='#667eea',
             text=top_roi['ROI_Score'],
             textposition='outside',
             texttemplate='%{text:.1f}',
             textfont=dict(size=11),
-            hovertemplate='%{y}<br>ROI Score: %{x:.1f}<extra></extra>',
+            hovertemplate='<b>%{y}</b><br>ROI Score: %{x:.1f}<extra></extra>',
+            name='ROI Score',
             showlegend=False
         ),
         row=2, col=2
