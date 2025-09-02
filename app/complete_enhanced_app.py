@@ -520,39 +520,150 @@ def main():
             coverage_df = data['focus_area_coverage']
             resources_df = data['resources_corrected']
             
-            # Domain capacity
+            # Key metrics row
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                total_resources = len(resources_df)
+                st.metric("Total Resources", f"{total_resources:,}")
+            
+            with col2:
+                avg_skills = resources_df['skill_count'].mean()
+                st.metric("Avg Skills/Person", f"{avg_skills:.1f}")
+            
+            with col3:
+                avg_rating = resources_df['avg_rating'].mean()
+                st.metric("Avg Rating", f"⭐ {avg_rating:.2f}")
+            
+            with col4:
+                domains = resources_df['primary_domain'].nunique()
+                st.metric("Active Domains", f"{domains}")
+            
+            # Domain capacity with better visualization
             st.markdown("### 🏢 Domain Capacity Analysis")
             
             domain_counts = resources_df['primary_domain'].value_counts()
             
-            fig = go.Figure()
-            fig.add_trace(go.Bar(
-                x=domain_counts.index,
-                y=domain_counts.values,
-                marker_color='#667eea',
-                text=domain_counts.values,
-                textposition='outside'
-            ))
-            fig.update_layout(
-                title="Resources by Domain",
-                xaxis_title="Domain",
-                yaxis_title="Number of Resources",
-                height=400
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            # Create two columns for domain analysis
+            col1, col2 = st.columns([2, 1])
             
-            # Geographic distribution
+            with col1:
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    x=domain_counts.values,
+                    y=domain_counts.index,
+                    orientation='h',
+                    marker_color=['#667eea' if i < 3 else '#98a6d4' for i in range(len(domain_counts))],
+                    text=domain_counts.values,
+                    textposition='outside',
+                    hovertemplate='<b>%{y}</b><br>Resources: %{x}<br>%{x} professionals<extra></extra>'
+                ))
+                fig.update_layout(
+                    title=dict(text="Resources by Technical Domain", font=dict(size=16)),
+                    xaxis_title="Number of Resources",
+                    yaxis_title="",
+                    height=400,
+                    margin=dict(l=200)
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                st.markdown("**Domain Insights:**")
+                top_domain = domain_counts.index[0]
+                st.info(f"💡 **{top_domain}** has the most resources ({domain_counts.values[0]} professionals)")
+                
+                # Calculate domain coverage percentage
+                st.markdown("**Coverage Distribution:**")
+                for domain, count in domain_counts.head(5).items():
+                    pct = count / total_resources * 100
+                    st.progress(pct/100)
+                    st.caption(f"{domain[:20]}: {pct:.1f}%")
+            
+            # Geographic distribution with enhanced visuals
             st.markdown("### 🌍 Geographic Distribution")
             
             if 'city' in resources_df.columns:
                 city_counts = resources_df['city'].value_counts().head(10)
                 
-                fig = px.pie(
-                    values=city_counts.values,
-                    names=city_counts.index,
-                    title="Top 10 Locations"
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    # Create sunburst or treemap for better hierarchy
+                    fig = go.Figure(go.Treemap(
+                        labels=city_counts.index,
+                        parents=[""] * len(city_counts),
+                        values=city_counts.values,
+                        text=[f"{city}<br>{count} resources" for city, count in city_counts.items()],
+                        textinfo="label+value+percent root",
+                        marker=dict(colorscale='Blues', line=dict(width=2))
+                    ))
+                    fig.update_layout(
+                        title=dict(text="Resource Distribution by Location", font=dict(size=16)),
+                        height=400,
+                        margin=dict(t=50, l=0, r=0, b=0)
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    st.markdown("**Geographic Insights:**")
+                    
+                    # Concentration analysis
+                    top_3_cities = city_counts.head(3)
+                    concentration = top_3_cities.sum() / total_resources * 100
+                    
+                    if concentration > 80:
+                        st.warning(f"⚠️ High concentration: {concentration:.1f}% of resources in top 3 cities")
+                    else:
+                        st.success(f"✅ Good distribution: {concentration:.1f}% in top 3 cities")
+                    
+                    st.markdown("**Top Locations:**")
+                    for city, count in city_counts.head(5).items():
+                        st.markdown(f"• **{city}**: {count} ({count/total_resources*100:.1f}%)")
+            
+            # Skills distribution analysis
+            st.markdown("### 🎯 Skills Distribution Analysis")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Skill count distribution
+                skill_ranges = pd.cut(resources_df['skill_count'], 
+                                     bins=[0, 5, 10, 15, 20, 100],
+                                     labels=['1-5', '6-10', '11-15', '16-20', '20+'])
+                skill_dist = skill_ranges.value_counts().sort_index()
+                
+                fig = go.Figure(go.Bar(
+                    x=skill_dist.index,
+                    y=skill_dist.values,
+                    marker_color='#28a745',
+                    text=skill_dist.values,
+                    textposition='outside'
+                ))
+                fig.update_layout(
+                    title="Skills per Professional",
+                    xaxis_title="Skill Count Range",
+                    yaxis_title="Number of Professionals",
+                    height=300
                 )
-                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                # Rating distribution
+                rating_ranges = pd.cut(resources_df['avg_rating'],
+                                      bins=[0, 2, 3, 4, 5],
+                                      labels=['Poor (0-2)', 'Fair (2-3)', 'Good (3-4)', 'Excellent (4-5)'])
+                rating_dist = rating_ranges.value_counts()
+                
+                fig = go.Figure(go.Pie(
+                    values=rating_dist.values,
+                    labels=rating_dist.index,
+                    hole=0.4,
+                    marker_colors=['#dc3545', '#ffc107', '#28a745', '#007bff']
+                ))
+                fig.update_layout(
+                    title="Proficiency Distribution",
+                    height=300
+                )
                 st.plotly_chart(fig, use_container_width=True)
     
     with tab6:
