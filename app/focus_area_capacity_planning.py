@@ -48,8 +48,15 @@ def show_focus_area_capacity_planning(data):
         st.error("❌ Focus Area data not available. Please run Focus Area integration first.")
         return
     
-    coverage_df = data['focus_area_coverage']
+    coverage_df = data['focus_area_coverage'].copy()
     resources_df = data.get('resources_corrected', pd.DataFrame())
+    
+    # Ensure essential columns exist in coverage_df for all functions
+    if 'Resources_Needed' not in coverage_df.columns:
+        coverage_df['Resources_Needed'] = (coverage_df['Revenue_Potential'] * 2.5).round().astype(int)
+    if 'Gap' not in coverage_df.columns:
+        coverage_df['Gap'] = coverage_df['Resources_Needed'] - coverage_df['Resource_Count']
+        coverage_df['Gap'] = coverage_df['Gap'].clip(lower=0)
     
     # Create analysis tabs
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -271,8 +278,12 @@ def show_current_vs_required(coverage_df):
     """Show current vs required resources by Focus Area."""
     st.markdown("### 📊 Current vs Required Resources")
     
-    # Prepare data
+    # Prepare data - ensure all necessary columns exist
+    coverage_df = coverage_df.copy()
     coverage_df['Resources_Needed'] = (coverage_df['Revenue_Potential'] * 2.5).round().astype(int)
+    coverage_df['Gap'] = coverage_df['Resources_Needed'] - coverage_df['Resource_Count']
+    coverage_df['Gap'] = coverage_df['Gap'].clip(lower=0)  # No negative gaps
+    
     top_15 = coverage_df.nlargest(15, 'Revenue_Potential')
     
     # Create stacked bar chart
@@ -294,9 +305,9 @@ def show_current_vs_required(coverage_df):
     fig.add_trace(go.Bar(
         name='Additional Needed',
         x=top_15['Focus_Area'].str[:25],
-        y=top_15['Gap'].clip(lower=0),
+        y=top_15['Gap'],
         marker_color='#dc3545',
-        text=top_15['Gap'].clip(lower=0),
+        text=top_15['Gap'],
         textposition='inside',
         textfont=dict(size=11, color='white'),
         hovertemplate='%{x}<br>Gap: %{y}<extra></extra>'
