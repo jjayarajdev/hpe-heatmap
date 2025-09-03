@@ -79,6 +79,12 @@ def show_revenue_based_planning(coverage_df, resources_df):
     """Revenue-driven capacity planning."""
     st.markdown("### 💰 Revenue-Driven Resource Allocation")
     
+    # Clean the dataframe to remove any undefined/NaN values
+    coverage_df = coverage_df.copy()
+    coverage_df['Focus_Area'] = coverage_df['Focus_Area'].fillna('Unknown').astype(str)
+    coverage_df['Revenue_Potential'] = coverage_df['Revenue_Potential'].fillna(0)
+    coverage_df['Resource_Count'] = coverage_df['Resource_Count'].fillna(0)
+    
     # Calculate resources needed per million dollar of revenue
     resources_per_million = 2.5  # Industry benchmark
     
@@ -104,6 +110,9 @@ def show_revenue_based_planning(coverage_df, resources_df):
     )
     
     # 1. Revenue vs Resources scatter
+    # Clean Focus Area names to avoid 'undefined' labels
+    focus_area_names = coverage_df['Focus_Area'].fillna('Unknown').astype(str).str[:20]
+    
     fig.add_trace(
         go.Scatter(
             x=coverage_df['Revenue_Potential'],
@@ -116,7 +125,7 @@ def show_revenue_based_planning(coverage_df, resources_df):
                 showscale=True,
                 colorbar=dict(title=dict(text="Gap", font=dict(size=12)), x=0.45, y=0.75, tickfont=dict(size=11))
             ),
-            text=coverage_df['Focus_Area'].str[:20],
+            text=focus_area_names,
             textposition="top center",
             textfont=dict(size=11, color='black', family='Arial'),
             hovertemplate='<b>%{text}</b><br>Revenue: $%{x:.1f}M<br>Resources: %{y}<br>Gap: %{marker.color}<extra></extra>',
