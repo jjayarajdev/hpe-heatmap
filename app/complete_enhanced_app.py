@@ -142,7 +142,7 @@ def load_enhanced_data():
                 fa_resources = integrator.link_resources_to_focus_areas(resources_df, services_enhanced, resource_details)
                 
                 # Calculate coverage
-                coverage_df = integrator.calculate_focus_area_coverage(focus_areas_df, fa_resources)
+                coverage_df = integrator.calculate_focus_area_coverage(fa_resources)
                 
                 # Update data
                 data['focus_areas'] = focus_areas_df
