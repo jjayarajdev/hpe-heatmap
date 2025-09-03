@@ -121,13 +121,40 @@ def load_enhanced_data():
                 'manager': [f"Manager_{i//10}" for i in range(565)]
             })
         
-        # Integrate Focus Areas
+        # Integrate Focus Areas - Use pre-computed data for cloud deployment
         try:
-            focus_results = integrate_focus_areas()
-            if focus_results:
-                data.update(focus_results)
-        except:
-            # Create sample Focus Area data
+            # Try to load pre-computed Focus Area data
+            integrator = FocusAreaIntegrator()
+            
+            # Load opportunities for Focus Areas
+            opp_df = pd.read_parquet('data_processed/opportunity_RAWDATA_Export.parquet')
+            focus_areas_df = integrator.extract_focus_areas_from_opportunities(opp_df)
+            
+            # Load and enhance services
+            services_df = pd.read_parquet('data_processed/service_skillset_Services_to_skillsets_Mapping_Master_v5.parquet')
+            services_enhanced = integrator.map_services_to_focus_areas(services_df)
+            
+            # Load resources and link to Focus Areas
+            if 'resources_corrected' in data:
+                resources_df = data['resources_corrected']
+                # Load original resource details for skill mapping
+                resource_details = pd.read_parquet('data_processed/resource_DETAILS_28_Export_clean_clean_enhanced.parquet')
+                fa_resources = integrator.link_resources_to_focus_areas(resources_df, services_enhanced, resource_details)
+                
+                # Calculate coverage
+                coverage_df = integrator.calculate_focus_area_coverage(focus_areas_df, fa_resources)
+                
+                # Update data
+                data['focus_areas'] = focus_areas_df
+                data['services_enhanced'] = services_enhanced
+                data['focus_area_resources'] = fa_resources
+                data['focus_area_coverage'] = coverage_df
+            else:
+                raise ValueError("Resources data not loaded")
+                
+        except Exception as e:
+            st.warning(f"Focus Area integration failed, using fallback data: {str(e)}")
+            # Create sample Focus Area data as fallback
             data['focus_area_coverage'] = pd.DataFrame({
                 'Focus_Area': [
                     'AI Solutions', 'AI Platforms', 'Cloud-Native Platforms', 

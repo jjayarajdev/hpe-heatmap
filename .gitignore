@@ -78,8 +78,6 @@ venv.bak/
 # Data files (sensitive/large)
 data/*.xlsx
 data/*.csv
-data_processed/*.parquet
-*.parquet
 
 # Logs
 logs/
