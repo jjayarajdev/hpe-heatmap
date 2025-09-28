@@ -1,229 +1,177 @@
-# HPE Talent Intelligence Platform
+# HPE Deal Intelligence Platform
 
-A comprehensive, production-grade ML pipeline for intelligent resource assignment, Focus Area alignment, and strategic workforce planning.
+Transform opportunities into strategic advantage through complete opportunity-to-skills visibility with high-performance SQLite database backend.
 
-## 🚀 Overview
+## Quick Start
 
-The HPE Talent Intelligence Platform is an advanced workforce management system that integrates 565 unique professionals across 31 Focus Areas representing $288M in revenue opportunities. Built with cutting-edge data science and visualization technologies, it provides real-time insights for strategic decision-making.
-
-## ✨ Key Features
-
-### 📊 Executive Dashboard
-- **Real-time Metrics**: Track 565 professionals, 31 Focus Areas, $288M opportunities
-- **Risk Analysis**: Visual gauges showing revenue at risk and resource gaps
-- **Focus Area Coverage**: Comprehensive mapping of resources to business priorities
-- **Interactive Visualizations**: Plotly-based charts with enhanced readability
-
-### 🎯 Focus Area Intelligence
-- **31 Strategic Focus Areas**: From AI Solutions to Platform Modernization
-- **Revenue Alignment**: Each Focus Area mapped to specific revenue potential
-- **Resource Mapping**: Bidirectional taxonomy (Services ↔ Skillsets ↔ Skills ↔ Resources)
-- **Gap Analysis**: Identify critical resource shortfalls using 2.5 resources/$1M benchmark
-
-### 🔍 Smart Resource Search
-- **Accurate Skill Matching**: Fixed algorithm correctly identifies all matching resources
-- **Multi-criteria Search**: Search by skills, domains, or Focus Areas
-- **Relevance Scoring**: Weighted scoring system for precise matches
-- **Performance Metrics**: View ratings, skill counts, and experience levels
-
-### 📈 Strategic Forecasting
-- **6-Tab Analysis Interface**:
-  - Executive Summary with key metrics
-  - Skill Gap Analysis with heat maps
-  - Demand Forecasting with ML predictions
-  - Scenario Planning for what-if analysis
-  - AI-powered Recommendations
-  - Geographic Intelligence
-
-### 💼 Capacity Planning
-- **Revenue-Based Planning**: Resource allocation tied to revenue opportunities
-- **Domain Analysis**: Distribution across 10+ technical domains
-- **Geographic Distribution**: Concentration analysis across global locations
-- **Skills Distribution**: Proficiency levels and skill depth analysis
-
-## 🛠️ Technical Architecture
-
-### Data Pipeline
-```
-Raw Data (Excel) → Deduplication → Enhancement → Focus Area Integration → Visualization
-```
-
-### Core Components
-- **Data Processing**: 20,206 records deduplicated to 565 unique professionals
-- **Focus Area Integration**: Dynamic mapping of resources to business priorities
-- **Smart Matching Engine**: ML-based classification and recommendation
-- **Visualization Layer**: Streamlit + Plotly for interactive dashboards
-
-## 📁 Project Structure
-
-```
-HPE-Heatmap/
-├── app/                          # Streamlit application files
-│   ├── complete_enhanced_app.py # Main integrated application
-│   ├── focus_area_capacity_planning.py
-│   ├── enhanced_forecasting_page.py
-│   └── improved_smart_search.py
-├── src/                          # Core business logic
-│   ├── focus_area_integration.py # Focus Area mapping engine
-│   ├── enhanced_forecasting.py   # Forecasting models
-│   ├── classify.py               # Classification algorithms
-│   └── match.py                  # Resource matching logic
-├── data/                         # Raw data files (Excel)
-├── data_processed/               # Processed data (Parquet)
-│   └── resources_deduplicated.parquet
-├── notebooks/                    # Jupyter notebooks for analysis
-└── tests/                        # Unit tests
-```
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Python 3.11+
-- 4GB RAM minimum
-- Modern web browser
-
-### Installation
-
-1. Clone the repository:
 ```bash
-git clone https://github.com/jjayarajdev/hpe-heatmap.git
-cd hpe-heatmap
+# Launch the application launcher
+python3 launch_apps.py
+
+# Or run specific apps directly
+streamlit run apps/opportunity_chain_db.py        # Database version (FASTEST)
+streamlit run apps/opportunity_chain_complete.py  # Excel version
 ```
 
-2. Create virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+## Project Structure
+
+```
+HPE/Heatmap/
+├── apps/                      # Streamlit applications
+│   ├── opportunity_chain_db.py           # SQLite database version (34.6x faster)
+│   ├── opportunity_chain_complete.py     # Complete chain visualization
+│   ├── opportunity_skills_platform.py    # Opportunity-to-skills mapping
+│   ├── skills_chain_platform.py          # Clean skills chain
+│   ├── deal_skills_chain_platform_db.py  # Legacy database version
+│   └── deal_intelligence_platform.py     # Legacy dashboard
+│
+├── data/                      # Source data and database
+│   ├── heatmap.db                        # SQLite database (17.06 MB)
+│   ├── Opportunioty and PL sample.xlsx   # 22,002 opportunities
+│   ├── Services_to_skillsets Mapping.xlsx    # Service mappings
+│   ├── Skillsets_to_Skills_mapping.xlsx      # Skill definitions
+│   └── DETAILS (28).xlsx                     # Employee skills with ratings
+│
+├── scripts/                   # Analysis and utility scripts
+│   ├── create_heatmap_db.py             # Database creation script
+│   ├── validate_complete_chain.py       # Chain validation
+│   ├── analyze_broken_chains.py         # Gap analysis
+│   └── ...
+│
+├── docs/                      # Documentation
+├── launch_apps.py            # Main application launcher
+└── requirements.txt          # Python dependencies
 ```
 
-3. Install dependencies:
+## Key Features
+
+### 1. Opportunity-to-Skills Chain Platform (Database Version)
+- **34.6x faster** than Excel version using SQLite backend
+- Complete 6-step chain: Opportunities → Product Lines → Services → Skillsets → Skills → Resources
+- Tabbed interface for better organization
+- Real-time resource drill-down with proficiency ratings (2-5)
+- Direct PL code mapping (6 matched PLs)
+
+### 2. Opportunity Chain (Excel Version)
+- Same functionality as database version
+- Direct Excel file processing
+- Interactive Sankey visualizations
+- Skills gap analysis and matching
+
+### 3. Clean Skills Chain Platform
+- Direct Product Line to Skills mapping
+- No deals/focus area dependencies
+- Resource availability analysis
+- Clean architecture
+
+## Database Performance
+
+### SQLite Implementation (heatmap.db)
+- **Database Size**: 17.06 MB
+- **Tables**: 4 (opportunities, services_skillsets, skillsets_skills, employee_skills)
+- **Performance**: 10-100x faster than Excel
+- **Indexes**: Optimized for key columns
+
+### Table Statistics:
+- **opportunities**: 22,002 records
+- **services_skillsets**: 226 mappings
+- **skillsets_skills**: 3,451 mappings
+- **employee_skills**: 6,654 skill records
+
+## Key Findings
+
+- **22,002** opportunities tracked
+- **6** Product Lines with direct matches
+- **179** unique skillsets mapped
+- **505** unique resources with skills
+- **Proficiency Ratings**: Numeric scale (2-5) from Proficieny_Rating column
+
+## Recent Updates
+
+### Database Migration
+- **SQLite Database**: Created `heatmap.db` with all Excel data
+- **Performance**: 34.6x faster load times (0.09s vs 3.1s)
+- **Direct PL Mapping**: Only direct code matches used (6 PLs)
+- **Fixed Ratings**: Using Proficieny_Rating column for numeric values (2-5)
+
+### Tabbed Interface
+- **Tab 1**: Opportunity Selection and Overview
+- **Tab 2**: Product Line Analysis
+- **Tab 3**: Service Requirements
+- **Tab 4**: Skill Analysis
+- **Tab 5**: Resource Matching with drill-down
+
+## Installation
+
 ```bash
+# Install dependencies
 pip install -r requirements.txt
+
+# Create SQLite database from Excel files
+python3 scripts/create_heatmap_db.py
+
+# Launch application selector
+python3 launch_apps.py
 ```
 
-### Running the Application
+## Usage
 
+### For Fast Database Version
+1. Run `python3 launch_apps.py`
+2. Select option 1 for Database version (FASTEST)
+3. Navigate through tabs to explore the complete chain
+
+### For Excel-Based Analysis
+1. Run `python3 launch_apps.py`
+2. Select option 2 for Excel version
+3. Same functionality, loads directly from Excel files
+
+### For Clean Skills Chain
+1. Run `python3 launch_apps.py`
+2. Select option 3 for Skills Chain Platform
+3. Direct PL to Skills mapping without opportunity dependencies
+
+## Product Line Mapping
+
+Only direct code matches are used:
+| Opportunity PL Code | Service PL Code | Product Line Name |
+|---------------------|-----------------|-------------------|
+| 60 | 60 (IJ) | Cloud-Native Pltfms |
+| 1Z | 1Z (PN) | Network |
+| 5V | 5V (II) | Hybrid Workplace |
+| 4J | 4J (SX) | Education Services |
+| G4 | G4 (PK) | Private Platforms |
+| PD | PD (C8) | HPE POD Modular DC |
+
+## Excel Reports
+
+Find comprehensive Excel reports in `reports/` directory:
+- **PL_MAPPING_TABLE_DIRECT_ONLY.md**: Direct PL mapping documentation
+- Additional reports from previous analyses
+
+## Database Setup
+
+To recreate the SQLite database:
 ```bash
-streamlit run app/complete_enhanced_app.py
+cd scripts
+python3 create_heatmap_db.py
 ```
 
-Navigate to `http://localhost:8501` in your browser.
+This will:
+1. Load all Excel files from `data/` directory
+2. Create `heatmap.db` with 4 tables
+3. Add performance indexes
+4. Display database statistics
 
-## 📊 Data Overview
+## Support
 
-### Resource Statistics
-- **Total Professionals**: 565 unique individuals
-- **Skill Records**: 20,206 skill certifications
-- **Average Skills/Person**: 15.2
-- **Geographic Spread**: 8 locations globally
-- **Technical Domains**: 10 active domains
-
-### Focus Area Coverage
-- **Total Focus Areas**: 31 strategic areas
-- **Revenue Tracked**: $288M
-- **Critical Gaps**: 4 Focus Areas need immediate attention
-- **Well-Staffed**: 12 Focus Areas have adequate coverage
-
-### Geographic Distribution
-- **Primary Hubs**: 
-  - Bangalore: 58.1% (328 professionals)
-  - Sofia: 17.7% (100 professionals)
-  - Pune: 12.9% (73 professionals)
-- **Concentration Risk**: 88.7% in top 3 cities
-
-## 🔧 Key Fixes & Improvements
-
-### Recent Updates
-1. **Resource Counting Fix**: Corrected calculation using unique professionals instead of skill records
-2. **Search Accuracy**: Fixed AWS search returning 33 results correctly
-3. **Visualization Enhancement**: Larger fonts, better contrast, improved readability
-4. **Focus Area Names**: Proper truncation and display of long names
-5. **Nested Components**: Resolved Streamlit expander nesting issues
-
-## 🎯 Use Cases
-
-### Executive Leadership
-- Strategic workforce planning based on revenue opportunities
-- Risk assessment for critical Focus Areas
-- Resource allocation decisions
-
-### HR & Talent Management
-- Identify skill gaps and training needs
-- Geographic expansion planning
-- Talent acquisition priorities
-
-### Project Management
-- Find resources with specific skill combinations
-- Capacity planning for upcoming projects
-- Team composition optimization
-
-### Technical Leaders
-- Domain expertise assessment
-- Technology adoption tracking
-- Skills development roadmap
-
-## 📈 Performance Metrics
-
-- **Data Processing**: < 2 seconds for full dataset
-- **Search Response**: < 100ms for skill queries
-- **Dashboard Load**: < 3 seconds initial load
-- **Concurrent Users**: Supports 50+ simultaneous users
-
-## 🔐 Security & Privacy
-
-- No sensitive personal data exposed
-- Role-based access control ready
-- Audit logging capabilities
-- GDPR compliance considerations
-
-## 🚧 Roadmap
-
-### Phase 1 (Current)
-- ✅ Focus Area Integration
-- ✅ Smart Search Enhancement
-- ✅ Revenue-based Planning
-- ✅ Geographic Analysis
-
-### Phase 2 (Planned)
-- [ ] Real-time data synchronization
-- [ ] Advanced ML predictions
-- [ ] API integration layer
-- [ ] Mobile responsive design
-
-### Phase 3 (Future)
-- [ ] Automated skill verification
-- [ ] External talent marketplace integration
-- [ ] AI-powered career pathing
-- [ ] Predictive attrition modeling
-
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📝 License
-
-Copyright (c) 2025 HPE. All rights reserved.
-
-## 🙏 Acknowledgments
-
-- HPE Talent Management Team
-- Data Engineering Team
-- All 565 professionals in the system
-
-## 📧 Contact
-
-For questions or support, please contact:
-- Repository: [https://github.com/jjayarajdev/hpe-heatmap](https://github.com/jjayarajdev/hpe-heatmap)
-- Issues: [GitHub Issues](https://github.com/jjayarajdev/hpe-heatmap/issues)
+For issues or questions:
+- Database creation: `scripts/create_heatmap_db.py`
+- Application logic: `apps/opportunity_chain_db.py`
+- Documentation: `docs/` directory
 
 ---
 
-**Built with ❤️ for intelligent workforce management**
-
-*Last Updated: September 2, 2025*
+*Platform Version: 3.0*
+*Data Current As Of: January 2025*
+*Total Opportunities: 22,002*
