@@ -122,6 +122,14 @@ class CompleteOpportunityChainDB:
         self.create_pl_mapping()  # Must come before build_complete_chain
         self.build_complete_chain()
 
+    @staticmethod
+    def format_currency_millions(value):
+        """Format currency value in millions with proper rounding"""
+        if pd.isna(value) or value == 0:
+            return "$0.0M"
+        millions = value / 1e6
+        return f"${millions:.1f}M"
+
     def load_all_data(self):
         """Load all required data files"""
         try:
@@ -170,8 +178,8 @@ class CompleteOpportunityChainDB:
         # Clean columns
         self.opportunity_df.columns = self.opportunity_df.columns.str.strip()
 
-        # Convert revenue
-        self.opportunity_df['Schedule Amount (converted)'] = pd.to_numeric(
+        # Convert revenue and rename to TCV USD
+        self.opportunity_df['TCV USD'] = pd.to_numeric(
             self.opportunity_df['Schedule Amount (converted)'], errors='coerce'
         )
 
@@ -182,7 +190,7 @@ class CompleteOpportunityChainDB:
                     'Opportunity Name',
                     'Account Name',
                     'Product Line',
-                    'Schedule Amount (converted)',
+                    'TCV USD',
                     'Sales Stage',
                     'Forecast Category'
                 ]
@@ -191,14 +199,30 @@ class CompleteOpportunityChainDB:
             self.opportunity_summary = self.opportunity_df.groupby(
                 ['HPE Opportunity Id', 'Opportunity Name', 'Account Name', 'Product Line']
             ).agg({
-                'Schedule Amount (converted)': 'sum',
+                'TCV USD': 'sum',
                 'Sales Stage': 'first',
                 'Forecast Category': 'first'
             }).reset_index()
 
+            # Add PL Code and Description columns
+            def extract_pl_code(pl):
+                """Extract PL code from Product Line"""
+                if ' - ' in str(pl):
+                    return str(pl).split(' - ')[0].strip()
+                return str(pl).strip()
+
+            def extract_pl_description(pl):
+                """Extract PL description from Product Line"""
+                if ' - ' in str(pl):
+                    return str(pl).split(' - ')[1].strip()
+                return ''
+
+            self.opportunity_summary['Product Line Code'] = self.opportunity_summary['Product Line'].apply(extract_pl_code)
+            self.opportunity_summary['Product Line Description'] = self.opportunity_summary['Product Line'].apply(extract_pl_description)
+
         # Calculate metrics
         self.total_opportunities = self.opportunity_df['HPE Opportunity Id'].nunique()
-        self.total_value = self.opportunity_df['Schedule Amount (converted)'].sum()
+        self.total_value = self.opportunity_df['TCV USD'].sum()
         self.unique_pls = self.opportunity_df['Product Line'].nunique()
 
     def process_employee_data(self):
@@ -262,7 +286,7 @@ class CompleteOpportunityChainDB:
                 'pl_full': pl_full,
                 'opportunity_name': row['Opportunity Name'],
                 'account': row['Account Name'],
-                'value': row['Schedule Amount (converted)'],
+                'value': row['TCV USD'],
                 'stage': row.get('Sales Stage', 'Unknown'),
                 'forecast': row.get('Forecast Category', 'Unknown')
             }
@@ -374,21 +398,23 @@ class CompleteOpportunityChainDB:
         chain['skills'] = list(chain['skills'])[:50]
 
         # Get resources from skills
-        resource_scores = defaultdict(lambda: {'count': 0, 'total_rating': 0, 'skills': []})
+        resource_scores = defaultdict(lambda: {'count': 0, 'max_rating': 0, 'skills': []})
 
         for skill in chain['skills']:
             for resource in self.skill_to_resources.get(skill, []):
                 resource_scores[resource['name']]['count'] += 1
-                resource_scores[resource['name']]['total_rating'] += resource['rating']
+                # Track max rating (peak proficiency) instead of averaging
+                current_max = resource_scores[resource['name']]['max_rating']
+                resource_scores[resource['name']]['max_rating'] = max(current_max, resource['rating'])
                 resource_scores[resource['name']]['skills'].append({
                     'skill': skill,
                     'rating': resource['rating']
                 })
 
-        # Sort resources by match count and rating
+        # Sort resources by match count and max rating
         sorted_resources = sorted(
             resource_scores.items(),
-            key=lambda x: (x[1]['count'], x[1]['total_rating']),
+            key=lambda x: (x[1]['count'], x[1]['max_rating']),
             reverse=True
         )
 
@@ -528,6 +554,7 @@ class CompleteOpportunityChainDB:
 
         # Create Sankey diagram
         labels = []
+        customdata = []  # Full text for hover
         sources = []
         targets = []
         values = []
@@ -536,72 +563,90 @@ class CompleteOpportunityChainDB:
         node_index = {}
         current_idx = 0
 
-        # Add opportunity node
-        opp_label = f"Opp: {chain['opportunity']['opportunity_name'][:30]}"
-        labels.append(opp_label)
-        node_index[opp_label] = current_idx
+        # Add opportunity node (shortened label, full name in hover)
+        opp_short = chain['opportunity']['opportunity_name'][:25] + "..." if len(chain['opportunity']['opportunity_name']) > 25 else chain['opportunity']['opportunity_name']
+        labels.append(opp_short)
+        customdata.append(chain['opportunity']['opportunity_name'])
+        node_index[opp_short] = current_idx
         colors.append('#667eea')
         current_idx += 1
 
         # Add PL node
-        pl_label = f"PL: {chain['product_line']}"
+        pl_label = chain['product_line']
         labels.append(pl_label)
+        customdata.append(f"Product Line: {chain['product_line']}")
         node_index[pl_label] = current_idx
         colors.append('#764ba2')
         current_idx += 1
 
-        sources.append(node_index[opp_label])
+        sources.append(node_index[opp_short])
         targets.append(node_index[pl_label])
         values.append(chain['opportunity']['value'])
 
         # Add services (limited)
         for service in chain['services'][:3]:
-            service_label = f"Svc: {service[:20]}"
-            if service_label not in node_index:
-                labels.append(service_label)
-                node_index[service_label] = current_idx
+            # Shorten service name intelligently
+            service_short = service[:30] + "..." if len(service) > 30 else service
+            if service_short not in node_index:
+                labels.append(service_short)
+                customdata.append(f"Service: {service}")
+                node_index[service_short] = current_idx
                 colors.append('#01a982')
                 current_idx += 1
 
             sources.append(node_index[pl_label])
-            targets.append(node_index[service_label])
+            targets.append(node_index[service_short])
             values.append(chain['opportunity']['value'] / len(chain['services'][:3]))
 
             # Add skillsets for this service
             service_skillsets = list(self.service_to_skillsets.get(service, set()))[:2]
             for skillset in service_skillsets:
-                skillset_label = f"SS: {skillset[:15]}"
-                if skillset_label not in node_index:
-                    labels.append(skillset_label)
-                    node_index[skillset_label] = current_idx
+                skillset_short = skillset[:25] + "..." if len(skillset) > 25 else skillset
+                if skillset_short not in node_index:
+                    labels.append(skillset_short)
+                    customdata.append(f"Skillset: {skillset}")
+                    node_index[skillset_short] = current_idx
                     colors.append('#f5576c')
                     current_idx += 1
 
-                sources.append(node_index[service_label])
-                targets.append(node_index[skillset_label])
+                sources.append(node_index[service_short])
+                targets.append(node_index[skillset_short])
                 values.append(chain['opportunity']['value'] / (len(chain['services'][:3]) * 2))
 
         # Create Sankey
         fig = go.Figure(data=[go.Sankey(
             node=dict(
-                pad=15,
-                thickness=20,
+                pad=20,
+                thickness=25,
                 line=dict(color="black", width=0.5),
                 label=labels,
-                color=colors
+                color=colors,
+                customdata=customdata,
+                hovertemplate='%{customdata}<br>Value: %{value:,.0f}<extra></extra>'
             ),
             link=dict(
                 source=sources,
                 target=targets,
                 value=values,
                 color='rgba(100, 100, 100, 0.2)'
+            ),
+            textfont=dict(
+                color='black',
+                size=16,
+                family='Arial Black, Arial, sans-serif'
             )
         )])
 
         fig.update_layout(
-            title=f"Complete Chain for Opportunity: ${chain['opportunity']['value']/1e6:.1f}M",
-            height=500,
-            font=dict(size=12)
+            title=dict(
+                text=f"Complete Chain for Opportunity: ${chain['opportunity']['value']/1e6:.1f}M",
+                font=dict(size=18, family="Arial, sans-serif", color='black')
+            ),
+            height=600,
+            font=dict(size=16, family="Arial, sans-serif", color='black'),
+            margin=dict(l=10, r=10, t=60, b=10),
+            paper_bgcolor='white',
+            plot_bgcolor='white'
         )
 
         st.plotly_chart(fig, use_container_width=True)
@@ -662,9 +707,10 @@ class CompleteOpportunityChainDB:
         with col1:
             st.subheader("📈 Opportunity Distribution")
             # Top opportunities by value
-            top_opps = self.opportunity_summary.nlargest(10, 'Schedule Amount (converted)')
+            top_opps = self.opportunity_summary.nlargest(10, 'TCV USD').copy()
+            top_opps['TCV USD (M)'] = top_opps['TCV USD'].apply(self.format_currency_millions)
             st.dataframe(
-                top_opps[['HPE Opportunity Id', 'Opportunity Name', 'Product Line', 'Schedule Amount (converted)']],
+                top_opps[['HPE Opportunity Id', 'Opportunity Name', 'Product Line Code', 'Product Line Description', 'TCV USD (M)']],
                 use_container_width=True,
                 hide_index=True
             )
@@ -673,11 +719,53 @@ class CompleteOpportunityChainDB:
             st.subheader("🎯 Product Line Summary")
             pl_summary = self.opportunity_summary.groupby('Product Line').agg({
                 'HPE Opportunity Id': 'count',
-                'Schedule Amount (converted)': 'sum'
+                'TCV USD': 'sum'
             }).reset_index()
             pl_summary.columns = ['Product Line', 'Count', 'Total Value']
+            pl_summary['Total Value (M)'] = pl_summary['Total Value'].apply(self.format_currency_millions)
             pl_summary = pl_summary.sort_values('Total Value', ascending=False)
-            st.dataframe(pl_summary, use_container_width=True, hide_index=True)
+            st.dataframe(pl_summary[['Product Line', 'Count', 'Total Value (M)']], use_container_width=True, hide_index=True)
+
+        # Visualizations
+        st.subheader("📊 Visual Analytics")
+        viz_col1, viz_col2 = st.columns(2)
+
+        with viz_col1:
+            # Pie chart for TCV USD by Product Line
+            pl_value_summary = self.opportunity_summary.groupby('Product Line').agg({
+                'TCV USD': 'sum'
+            }).reset_index()
+            pl_value_summary = pl_value_summary.sort_values('TCV USD', ascending=False)
+
+            fig_pie = px.pie(
+                pl_value_summary,
+                values='TCV USD',
+                names='Product Line',
+                title='TCV USD Distribution by Product Line',
+                hole=0.4
+            )
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+            fig_pie.update_layout(height=400)
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        with viz_col2:
+            # Bar chart for Opportunity Count by Product Line
+            pl_count_summary = self.opportunity_summary.groupby('Product Line').agg({
+                'HPE Opportunity Id': 'count'
+            }).reset_index()
+            pl_count_summary.columns = ['Product Line', 'Count']
+            pl_count_summary = pl_count_summary.sort_values('Count', ascending=False)
+
+            fig_bar = px.bar(
+                pl_count_summary,
+                x='Product Line',
+                y='Count',
+                title='Opportunity Count by Product Line',
+                color='Count',
+                color_continuous_scale='Blues'
+            )
+            fig_bar.update_layout(height=400, xaxis_tickangle=-45)
+            st.plotly_chart(fig_bar, use_container_width=True)
 
         # Coverage metrics
         st.subheader("📊 Mapping Coverage")
@@ -712,10 +800,10 @@ class CompleteOpportunityChainDB:
             st.warning("No opportunities available for analysis.")
             return
 
-        top_opps = self.opportunity_summary.nlargest(50, 'Schedule Amount (converted)')
+        top_opps = self.opportunity_summary.nlargest(50, 'TCV USD')
 
         opp_options = {
-            f"{row['HPE Opportunity Id']}: {row['Opportunity Name'][:50]}... (${row['Schedule Amount (converted)']/1e6:.1f}M)":
+            f"{row['HPE Opportunity Id']}: {row['Opportunity Name'][:50]}... (${row['TCV USD']/1e6:.1f}M)":
             row['HPE Opportunity Id']
             for _, row in top_opps.iterrows()
         }
@@ -751,11 +839,18 @@ class CompleteOpportunityChainDB:
                 with steps[1]:
                     st.markdown("""
                     <div class="chain-flow">
-                    2️⃣ Product Line
+                    2️⃣ PL Code | Description
                     </div>
                     """, unsafe_allow_html=True)
-                    pl_display = chain['opportunity'].get('pl_full', chain['product_line'])
-                    st.info(pl_display)
+                    # Display both code and description side-by-side
+                    pl_code = chain['opportunity'].get('pl_code', chain['product_line'])
+                    pl_full = chain['opportunity'].get('pl_full', chain['product_line'])
+                    # Extract description if available
+                    if ' - ' in str(pl_full):
+                        pl_desc = str(pl_full).split(' - ')[1].strip()
+                        st.info(f"{pl_code} | {pl_desc}")
+                    else:
+                        st.info(pl_code)
 
                 with steps[2]:
                     st.markdown("""
@@ -818,8 +913,8 @@ class CompleteOpportunityChainDB:
                             st.metric("Matches", resource_data['count'])
 
                         with col3:
-                            avg_rating = resource_data['total_rating'] / resource_data['count'] if resource_data['count'] > 0 else 0
-                            st.metric("Avg Rating", f"{avg_rating:.1f}")
+                            max_rating = resource_data['max_rating']
+                            st.metric("Max Rating", f"{max_rating:.1f}")
 
                         with col4:
                             st.metric("Location", profile.get('location', 'Unknown'))
@@ -901,35 +996,64 @@ class CompleteOpportunityChainDB:
                     continue
             filtered_resources.append((name, profile))
 
-        # Display resources
+        # Display resources with improved UI
         if filtered_resources:
             for name, profile in filtered_resources[:20]:
                 with st.expander(f"👤 {name} - {profile.get('location', 'Unknown')} ({len(profile['skills'])} skills)"):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.write(f"**Manager:** {profile.get('manager', 'N/A')}")
-                        st.write(f"**Location:** {profile.get('location', 'N/A')}")
-                        st.write(f"**Total Skills:** {len(profile['skills'])}")
-                    with col2:
-                        st.write("**Top Skills:**")
-                        for skill_info in profile['skills'][:5]:
-                            rating_display = skill_info.get('rating_text', f"Level {skill_info['rating']}")
-                            st.write(f"• {skill_info['skill']} ({rating_display})")
+                    # Header with key info
+                    info_col1, info_col2, info_col3 = st.columns(3)
+                    with info_col1:
+                        st.markdown(f"**📍 Location:** {profile.get('location', 'N/A')}")
+                    with info_col2:
+                        st.markdown(f"**👔 Manager:** {profile.get('manager', 'N/A')[:25]}...")
+                    with info_col3:
+                        st.markdown(f"**🎯 Total Skills:** {len(profile['skills'])}")
 
-                    # Find matching opportunities button
-                    if st.button(f"Find Opportunities for {name}", key=f"find_opp_{name}"):
-                        st.session_state['find_opportunities_for'] = name
+                    st.divider()
+
+                    # Top skills with visual indicators
+                    st.markdown("**🏆 Top 5 Skills:**")
+                    for skill_info in profile['skills'][:5]:
+                        rating = skill_info['rating']
+                        rating_text = skill_info.get('rating_text', f"Level {rating}")
+
+                        # Color code by rating
+                        if rating >= 4:
+                            badge_color = "#28a745"  # Green for expert
+                            emoji = "🌟"
+                        elif rating >= 3:
+                            badge_color = "#17a2b8"  # Blue for advanced
+                            emoji = "⭐"
+                        elif rating >= 2:
+                            badge_color = "#ffc107"  # Yellow for intermediate
+                            emoji = "📘"
+                        else:
+                            badge_color = "#6c757d"  # Gray for beginner
+                            emoji = "📗"
+
+                        st.markdown(f"""
+                        <div style="background: {badge_color}15; border-left: 4px solid {badge_color}; padding: 8px; margin: 4px 0; border-radius: 4px;">
+                            {emoji} <b>{skill_info['skill'][:45]}</b> <span style="color: {badge_color}; float: right;">({rating_text})</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    st.divider()
+
+                    # Find matching opportunities button - more prominent
+                    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+                    with col_btn2:
+                        if st.button(f"🔍 Find Matching Opportunities", key=f"find_opp_{name}", use_container_width=True):
+                            self.show_opportunities_modal(name)
         else:
             st.info("No resources found matching your criteria")
 
-        # Opportunity matching (if requested)
-        if 'find_opportunities_for' in st.session_state:
-            resource_name = st.session_state['find_opportunities_for']
-            st.divider()
-            st.subheader(f"🎯 Opportunities for {resource_name}")
-            self.render_resource_opportunities(resource_name)
-            if st.button("Close Opportunity View"):
-                del st.session_state['find_opportunities_for']
+    @st.dialog("🎯 Matching Opportunities", width="large")
+    def show_opportunities_modal(self, resource_name):
+        """Show opportunities in a modal dialog"""
+        st.markdown(f"### Finding opportunities for **{resource_name}**")
+        st.markdown("---")
+
+        self.render_resource_opportunities(resource_name)
 
     def render_resource_opportunities(self, resource_name):
         """Find and display opportunities matching a resource's skills"""
@@ -958,18 +1082,40 @@ class CompleteOpportunityChainDB:
         matching_opps.sort(key=lambda x: (x['match_count'], x['value']), reverse=True)
 
         if matching_opps:
-            st.info(f"Found {len(matching_opps)} matching opportunities")
-            for opp in matching_opps[:10]:
-                col1, col2, col3 = st.columns([3, 1, 1])
-                with col1:
-                    st.write(f"**{opp['name'][:50]}**")
-                    st.caption(f"ID: {opp['id']}")
-                with col2:
-                    st.metric("Skills Match", f"{opp['match_count']}")
-                with col3:
-                    st.metric("Coverage", f"{opp['coverage']:.1f}%")
+            st.success(f"✅ Found {len(matching_opps)} matching opportunities")
+            st.markdown("---")
+
+            for idx, opp in enumerate(matching_opps[:10], 1):
+                # Color code by coverage
+                if opp['coverage'] >= 50:
+                    border_color = "#28a745"  # Green for high coverage
+                    bg_color = "#28a74510"
+                elif opp['coverage'] >= 20:
+                    border_color = "#17a2b8"  # Blue for medium coverage
+                    bg_color = "#17a2b810"
+                else:
+                    border_color = "#ffc107"  # Yellow for low coverage
+                    bg_color = "#ffc10710"
+
+                st.markdown(f"""
+                <div style="background: {bg_color}; border-left: 5px solid {border_color}; padding: 15px; margin: 10px 0; border-radius: 8px;">
+                    <div style="font-size: 14px; color: #666; margin-bottom: 5px;">#{idx} · ID: {opp['id']}</div>
+                    <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px;">{opp['name'][:60]}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                metric_col1, metric_col2, metric_col3 = st.columns(3)
+                with metric_col1:
+                    st.metric("💰 Value", self.format_currency_millions(opp['value']))
+                with metric_col2:
+                    st.metric("🎯 Skills Match", f"{opp['match_count']} skills")
+                with metric_col3:
+                    coverage_emoji = "🟢" if opp['coverage'] >= 50 else "🟡" if opp['coverage'] >= 20 else "🟠"
+                    st.metric(f"{coverage_emoji} Coverage", f"{opp['coverage']:.1f}%")
+
+                st.markdown("<br>", unsafe_allow_html=True)
         else:
-            st.warning("No matching opportunities found")
+            st.warning("⚠️ No matching opportunities found")
 
 
     def render_search_filter_tab(self):
@@ -999,13 +1145,15 @@ class CompleteOpportunityChainDB:
                 filtered = filtered[filtered['Opportunity Name'].str.contains(opp_search, case=False, na=False)]
             if pl_filter != "All":
                 filtered = filtered[filtered['Product Line'] == pl_filter]
-            filtered = filtered[(filtered['Schedule Amount (converted)'] >= min_value * 1e6) &
-                              (filtered['Schedule Amount (converted)'] <= max_value * 1e6)]
+            filtered = filtered[(filtered['TCV USD'] >= min_value * 1e6) &
+                              (filtered['TCV USD'] <= max_value * 1e6)]
 
             st.write(f"Found {len(filtered)} opportunities")
             if len(filtered) > 0:
-                st.dataframe(filtered[['HPE Opportunity Id', 'Opportunity Name', 'Product Line',
-                                      'Schedule Amount (converted)']].head(50),
+                filtered_display = filtered.head(50).copy()
+                filtered_display['TCV USD (M)'] = filtered_display['TCV USD'].apply(self.format_currency_millions)
+                st.dataframe(filtered_display[['HPE Opportunity Id', 'Opportunity Name', 'Product Line Code', 'Product Line Description',
+                                      'TCV USD (M)']],
                             use_container_width=True, hide_index=True)
 
         elif search_type == "Services":
