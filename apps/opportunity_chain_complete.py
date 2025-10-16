@@ -108,6 +108,23 @@ st.markdown("""
         margin: 2rem 0;
         box-shadow: 0 10px 30px rgba(0,0,0,0.3);
     }
+
+    /* Style popover buttons to match st.info() blue boxes */
+    [data-testid="stPopover"] button {
+        background-color: #d4edff !important;
+        border: 1px solid #0096D6 !important;
+        color: #0c5273 !important;
+        width: 100% !important;
+        padding: 0.75rem 1rem !important;
+        border-radius: 0.5rem !important;
+        font-weight: 500 !important;
+        text-align: center !important;
+    }
+
+    [data-testid="stPopover"] button:hover {
+        background-color: #b8e0ff !important;
+        border-color: #0078b3 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -125,9 +142,9 @@ class CompleteOpportunityChain:
     def format_currency_millions(value):
         """Format currency value in millions with proper rounding"""
         if pd.isna(value) or value == 0:
-            return "$0.0M"
+            return "$0.00M"
         millions = value / 1e6
-        return f"${millions:.1f}M"
+        return f"${millions:.2f}M"
 
     def load_all_data(self):
         """Load all required data files"""
@@ -416,19 +433,17 @@ class CompleteOpportunityChain:
 
         return chain
 
+    @st.dialog("👤 Resource Detail View", width="large")
     def render_resource_detail(self, resource_name):
-        """Render detailed view for a specific resource (double-click functionality)"""
+        """Render detailed view for a specific resource in a modal dialog"""
         if resource_name not in self.employee_profiles:
             st.error(f"Resource {resource_name} not found")
             return
 
         profile = self.employee_profiles[resource_name]
 
-        st.markdown(f"""
-        <div class="resource-detail-modal">
-            <h2>👤 {resource_name}</h2>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f"### {resource_name}")
+        st.markdown("---")
 
         # Basic Information
         col1, col2, col3, col4 = st.columns(4)
@@ -633,7 +648,7 @@ class CompleteOpportunityChain:
 
         fig.update_layout(
             title=dict(
-                text=f"Complete Chain for Opportunity: ${chain['opportunity']['value']/1e6:.1f}M",
+                text=f"Complete Chain for Opportunity: ${chain['opportunity']['value']/1e6:.2f}M",
                 font=dict(size=18, family="Arial, sans-serif", color='black')
             ),
             height=600,
@@ -796,7 +811,7 @@ class CompleteOpportunityChain:
         top_opps = self.opportunity_summary.nlargest(50, 'TCV USD')
 
         opp_options = {
-            f"{row['HPE Opportunity Id']}: {row['Opportunity Name'][:50]}... (${row['TCV USD']/1e6:.1f}M)":
+            f"{row['HPE Opportunity Id']}: {row['Opportunity Name'][:50]}... (${row['TCV USD']/1e6:.2f}M)":
             row['HPE Opportunity Id']
             for _, row in top_opps.iterrows()
         }
@@ -827,7 +842,8 @@ class CompleteOpportunityChain:
                     1️⃣ Opportunity
                     </div>
                     """, unsafe_allow_html=True)
-                    st.info(chain['opportunity']['opportunity_name'][:30])
+                    st.info(opp_id)
+                    st.caption(chain['opportunity']['opportunity_name'][:40])
 
                 with steps[1]:
                     st.markdown("""
@@ -851,7 +867,12 @@ class CompleteOpportunityChain:
                     3️⃣ Services
                     </div>
                     """, unsafe_allow_html=True)
-                    st.info(f"{len(chain['services'])} services")
+                    with st.popover(f"{len(chain['services'])} services", use_container_width=True):
+                        st.markdown("**Services Required:**")
+                        for idx, service in enumerate(chain['services'][:10], 1):
+                            st.write(f"{idx}. {service}")
+                        if len(chain['services']) > 10:
+                            st.caption(f"+ {len(chain['services']) - 10} more services")
 
                 with steps[3]:
                     st.markdown("""
@@ -859,7 +880,12 @@ class CompleteOpportunityChain:
                     4️⃣ Skillsets
                     </div>
                     """, unsafe_allow_html=True)
-                    st.info(f"{len(chain['skillsets'])} skillsets")
+                    with st.popover(f"{len(chain['skillsets'])} skillsets", use_container_width=True):
+                        st.markdown("**Skillsets Required:**")
+                        for idx, skillset in enumerate(chain['skillsets'][:10], 1):
+                            st.write(f"{idx}. {skillset}")
+                        if len(chain['skillsets']) > 10:
+                            st.caption(f"+ {len(chain['skillsets']) - 10} more skillsets")
 
                 with steps[4]:
                     st.markdown("""
@@ -867,7 +893,14 @@ class CompleteOpportunityChain:
                     5️⃣ Skills
                     </div>
                     """, unsafe_allow_html=True)
-                    st.info(f"{len(chain['skills'])} skills")
+                    with st.popover(f"{len(chain['skills'])} skills", use_container_width=True):
+                        st.markdown("**Skills Required:**")
+                        # Group skills and show with resource counts
+                        for idx, skill in enumerate(chain['skills'][:15], 1):
+                            resource_count = len(self.skill_to_resources.get(skill, []))
+                            st.write(f"{idx}. {skill[:50]} ({resource_count} resources)")
+                        if len(chain['skills']) > 15:
+                            st.caption(f"+ {len(chain['skills']) - 15} more skills")
 
                 with steps[5]:
                     st.markdown("""
@@ -875,7 +908,15 @@ class CompleteOpportunityChain:
                     6️⃣ Resources
                     </div>
                     """, unsafe_allow_html=True)
-                    st.info(f"{len(chain['resources'])} matched")
+                    with st.popover(f"{len(chain['resources'])} matched", use_container_width=True):
+                        st.markdown("**Top Matched Resources:**")
+                        for idx, (resource_name, resource_data) in enumerate(list(chain['resources'].items())[:10], 1):
+                            profile = self.employee_profiles.get(resource_name, {})
+                            location = profile.get('location', 'Unknown')
+                            match_count = resource_data['count']
+                            st.write(f"{idx}. **{resource_name}** ({location}) - {match_count} skills")
+                        if len(chain['resources']) > 10:
+                            st.caption(f"+ {len(chain['resources']) - 10} more resources")
 
                 # Visualization
                 st.header("🔗 Chain Visualization")
@@ -894,9 +935,9 @@ class CompleteOpportunityChain:
                         col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 1])
 
                         with col1:
-                            # Make resource clickable
+                            # Make resource clickable - opens modal
                             if st.button(f"👤 {resource_name}", key=f"res_{resource_name}"):
-                                st.session_state['selected_resource'] = resource_name
+                                self.render_resource_detail(resource_name)
 
                             # Show top skills
                             top_skills = ", ".join([s['skill'][:20] for s in resource_data['skills'][:3]])
@@ -917,15 +958,6 @@ class CompleteOpportunityChain:
                             avail = hash(resource_name) % 3
                             status = ["🟢 Available", "🔴 Busy", "🟡 Partial"][avail]
                             st.markdown(status)
-
-                    # Resource detail view (double-click functionality)
-                    if 'selected_resource' in st.session_state:
-                        st.divider()
-                        st.header("📋 Resource Detail View")
-                        self.render_resource_detail(st.session_state['selected_resource'])
-
-                        if st.button("Close Detail View"):
-                            del st.session_state['selected_resource']
 
                 else:
                     st.warning("No matching resources found for this opportunity")
@@ -1127,10 +1159,8 @@ class CompleteOpportunityChain:
             col1, col2 = st.columns(2)
             with col1:
                 opp_search = st.text_input("Opportunity name contains:", placeholder="Enter keywords...")
-                min_value = st.number_input("Minimum value ($M)", min_value=0.0, value=0.0)
             with col2:
                 pl_filter = st.selectbox("Product Line", ["All"] + self.opportunity_summary['Product Line'].unique().tolist())
-                max_value = st.number_input("Maximum value ($M)", min_value=0.0, value=1000.0)
 
             # Apply filters
             filtered = self.opportunity_summary.copy()
@@ -1138,8 +1168,6 @@ class CompleteOpportunityChain:
                 filtered = filtered[filtered['Opportunity Name'].str.contains(opp_search, case=False, na=False)]
             if pl_filter != "All":
                 filtered = filtered[filtered['Product Line'] == pl_filter]
-            filtered = filtered[(filtered['TCV USD'] >= min_value * 1e6) &
-                              (filtered['TCV USD'] <= max_value * 1e6)]
 
             st.write(f"Found {len(filtered)} opportunities")
             if len(filtered) > 0:
