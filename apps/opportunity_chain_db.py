@@ -252,7 +252,7 @@ class CompleteOpportunityChainDB:
             if pd.notna(emp_name):
                 if emp_name not in self.employee_profiles:
                     self.employee_profiles[emp_name] = {
-                        'skills': [],
+                        'skills_dict': {},  # Use dict to deduplicate by skill name
                         'location': row.get('RMR_City', 'Unknown'),
                         'manager': row.get('Resource_Manager_Name', 'Unknown'),
                         'domain': row.get('RMR_Domain', 'Unknown'),
@@ -260,6 +260,8 @@ class CompleteOpportunityChainDB:
                     }
 
                 if pd.notna(row.get('Skill_Certification_Name')):
+                    skill_name = row['Skill_Certification_Name']
+
                     # Use Proficieny_Rating column which has numeric values
                     proficiency_rating = row.get('Proficieny_Rating', 0)
                     # Also get the text rating for display purposes
@@ -271,12 +273,59 @@ class CompleteOpportunityChainDB:
                     except:
                         proficiency_rating = 0
 
-                    self.employee_profiles[emp_name]['skills'].append({
-                        'skill': row['Skill_Certification_Name'],
-                        'skillset': row.get('Skill_Set_Name', ''),
-                        'rating': proficiency_rating,
-                        'rating_text': text_rating  # Keep the descriptive text too
-                    })
+                    # Deduplicate: If skill already exists, keep the higher rating
+                    if skill_name not in self.employee_profiles[emp_name]['skills_dict']:
+                        self.employee_profiles[emp_name]['skills_dict'][skill_name] = {
+                            'skill': skill_name,
+                            'skillset': row.get('Skill_Set_Name', ''),
+                            'rating': proficiency_rating,
+                            'rating_text': text_rating
+                        }
+                    else:
+                        # Keep the higher rating if duplicate
+                        existing_rating = self.employee_profiles[emp_name]['skills_dict'][skill_name]['rating']
+                        if proficiency_rating > existing_rating:
+                            self.employee_profiles[emp_name]['skills_dict'][skill_name]['rating'] = proficiency_rating
+                            self.employee_profiles[emp_name]['skills_dict'][skill_name]['rating_text'] = text_rating
+
+        # Convert skills_dict to skills list for backward compatibility
+        for emp_name, profile in self.employee_profiles.items():
+            profile['skills'] = list(profile['skills_dict'].values())
+            del profile['skills_dict']  # Remove the temporary dict
+
+    def calculate_matching_resources(self, skills_list, limit=30):
+        """
+        Calculate matching resources from a list of skills.
+        Returns a dict of {resource_name: {count, max_rating, skills}} sorted by match quality.
+
+        Args:
+            skills_list: List of skill names to match resources against
+            limit: Maximum number of resources to return (default 30)
+
+        Returns:
+            Dictionary of top matching resources
+        """
+        resource_scores = defaultdict(lambda: {'count': 0, 'max_rating': 0, 'skills': []})
+
+        for skill in skills_list:
+            for resource in self.skill_to_resources.get(skill, []):
+                resource_scores[resource['name']]['count'] += 1
+                # Track max rating (peak proficiency) instead of averaging
+                current_max = resource_scores[resource['name']]['max_rating']
+                resource_scores[resource['name']]['max_rating'] = max(current_max, resource['rating'])
+                resource_scores[resource['name']]['skills'].append({
+                    'skill': skill,
+                    'rating': resource['rating']
+                })
+
+        # Sort resources by match count and max rating
+        sorted_resources = sorted(
+            resource_scores.items(),
+            key=lambda x: (x[1]['count'], x[1]['max_rating']),
+            reverse=True
+        )
+
+        return dict(sorted_resources[:limit])
 
     def create_pl_mapping(self):
         """Create mapping between opportunity PLs and service PLs"""
@@ -285,7 +334,7 @@ class CompleteOpportunityChainDB:
     def build_complete_chain(self):
         """Build the complete chain mappings"""
 
-        # STEP 1: OPPORTUNITY → PRODUCT LINE
+        # STEP 1: OPPORTUNITY → PRODUCT LINE (Supporting Multiple PLs)
         self.opportunity_to_pl = {}
         if self.opportunity_summary.empty:
             return
@@ -298,15 +347,24 @@ class CompleteOpportunityChainDB:
             else:
                 pl_code = str(pl_full).strip()
 
-            self.opportunity_to_pl[opp_id] = {
-                'pl_code': pl_code,
-                'pl_full': pl_full,
-                'opportunity_name': row['Opportunity Name'],
-                'account': row['Account Name'],
-                'value': row['TCV USD'],
-                'stage': row.get('Sales Stage', 'Unknown'),
-                'forecast': row.get('Forecast Category', 'Unknown')
-            }
+            # If opportunity already exists, append the PL to the list
+            if opp_id not in self.opportunity_to_pl:
+                self.opportunity_to_pl[opp_id] = {
+                    'pl_codes': [],  # Changed to list
+                    'pl_fulls': [],  # Changed to list
+                    'opportunity_name': row['Opportunity Name'],
+                    'account': row['Account Name'],
+                    'value': row['TCV USD'],
+                    'stage': row.get('Sales Stage', 'Unknown'),
+                    'forecast': row.get('Forecast Category', 'Unknown')
+                }
+
+            # Add this PL to the opportunity's list of PLs
+            self.opportunity_to_pl[opp_id]['pl_codes'].append(pl_code)
+            self.opportunity_to_pl[opp_id]['pl_fulls'].append(pl_full)
+            # Accumulate TCV USD if same opportunity has multiple PLs
+            if len(self.opportunity_to_pl[opp_id]['pl_codes']) > 1:
+                self.opportunity_to_pl[opp_id]['value'] += row['TCV USD']
 
         # STEP 2: PRODUCT LINE → SERVICES
         self.pl_to_services = defaultdict(set)
@@ -386,56 +444,44 @@ class CompleteOpportunityChainDB:
                 })
 
     def get_complete_chain(self, opportunity_id):
-        """Get the complete chain for an opportunity"""
+        """Get the complete chain for an opportunity (supports multiple PLs)"""
         if opportunity_id not in self.opportunity_to_pl:
             return None
 
         opp_data = self.opportunity_to_pl[opportunity_id]
-        pl_code = opp_data['pl_code']
+        pl_codes = opp_data['pl_codes']  # Now a list
 
         chain = {
             'opportunity': opp_data,
-            'product_line': pl_code,
-            'services': list(self.pl_to_services.get(pl_code, set()))[:10],
+            'product_lines': pl_codes,  # Changed to list
+            'services': set(),
             'skillsets': set(),
             'skills': set(),
             'resources': {}
         }
 
+        # Aggregate services from ALL Product Lines
+        for pl_code in pl_codes:
+            pl_services = self.pl_to_services.get(pl_code, set())
+            chain['services'].update(pl_services)
+
+        # Limit services for performance
+        chain['services'] = list(chain['services'])[:20]
+
         # Get skillsets from services
         for service in chain['services']:
             chain['skillsets'].update(self.service_to_skillsets.get(service, set()))
 
-        chain['skillsets'] = list(chain['skillsets'])[:20]
+        chain['skillsets'] = list(chain['skillsets'])[:30]
 
         # Get skills from skillsets
         for skillset in chain['skillsets']:
             chain['skills'].update(self.skillset_to_skills.get(skillset, set()))
 
-        chain['skills'] = list(chain['skills'])[:50]
+        chain['skills'] = list(chain['skills'])[:75]
 
-        # Get resources from skills
-        resource_scores = defaultdict(lambda: {'count': 0, 'max_rating': 0, 'skills': []})
-
-        for skill in chain['skills']:
-            for resource in self.skill_to_resources.get(skill, []):
-                resource_scores[resource['name']]['count'] += 1
-                # Track max rating (peak proficiency) instead of averaging
-                current_max = resource_scores[resource['name']]['max_rating']
-                resource_scores[resource['name']]['max_rating'] = max(current_max, resource['rating'])
-                resource_scores[resource['name']]['skills'].append({
-                    'skill': skill,
-                    'rating': resource['rating']
-                })
-
-        # Sort resources by match count and max rating
-        sorted_resources = sorted(
-            resource_scores.items(),
-            key=lambda x: (x[1]['count'], x[1]['max_rating']),
-            reverse=True
-        )
-
-        chain['resources'] = dict(sorted_resources[:20])
+        # Get resources from skills using the helper method
+        chain['resources'] = self.calculate_matching_resources(chain['skills'], limit=30)
 
         return chain
 
@@ -586,19 +632,24 @@ class CompleteOpportunityChainDB:
         colors.append('#667eea')
         current_idx += 1
 
-        # Add PL node
-        pl_label = chain['product_line']
-        labels.append(pl_label)
-        customdata.append(f"Product Line: {chain['product_line']}")
-        node_index[pl_label] = current_idx
-        colors.append('#764ba2')
-        current_idx += 1
+        # Add PL nodes (multiple PLs supported)
+        pl_nodes = []
+        for pl_code in chain['product_lines']:
+            pl_label = pl_code
+            labels.append(pl_label)
+            customdata.append(f"Product Line: {pl_code}")
+            node_index[pl_label] = current_idx
+            colors.append('#764ba2')
+            pl_nodes.append(pl_label)
+            current_idx += 1
 
-        sources.append(node_index[opp_short])
-        targets.append(node_index[pl_label])
-        values.append(chain['opportunity']['value'])
+            # Link opportunity to this PL
+            sources.append(node_index[opp_short])
+            targets.append(node_index[pl_label])
+            # Distribute value across all PLs
+            values.append(chain['opportunity']['value'] / len(chain['product_lines']))
 
-        # Add services (limited)
+        # Add services (limited) - connect to all PLs
         for service in chain['services'][:3]:
             # Shorten service name intelligently
             service_short = service[:30] + "..." if len(service) > 30 else service
@@ -609,9 +660,11 @@ class CompleteOpportunityChainDB:
                 colors.append('#01a982')
                 current_idx += 1
 
-            sources.append(node_index[pl_label])
-            targets.append(node_index[service_short])
-            values.append(chain['opportunity']['value'] / len(chain['services'][:3]))
+            # Connect each service to all PL nodes (distributed)
+            for pl_label in pl_nodes:
+                sources.append(node_index[pl_label])
+                targets.append(node_index[service_short])
+                values.append(chain['opportunity']['value'] / (len(chain['services'][:3]) * len(pl_nodes)))
 
             # Add skillsets for this service
             service_skillsets = list(self.service_to_skillsets.get(service, set()))[:2]
@@ -626,7 +679,7 @@ class CompleteOpportunityChainDB:
 
                 sources.append(node_index[service_short])
                 targets.append(node_index[skillset_short])
-                values.append(chain['opportunity']['value'] / (len(chain['services'][:3]) * 2))
+                values.append(chain['opportunity']['value'] / (len(chain['services'][:3]) * len(pl_nodes) * 2))
 
         # Create Sankey
         fig = go.Figure(data=[go.Sankey(
@@ -692,24 +745,33 @@ class CompleteOpportunityChainDB:
 
         st.divider()
 
-        # Create tabs for different views
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "📊 Overview",
-            "🔗 Chain Analysis",
-            "👥 Resources",
-            "🔍 Search & Filter"
-        ])
+        # Initialize session state for active tab if not exists
+        if 'active_tab' not in st.session_state:
+            st.session_state.active_tab = 0
 
-        with tab1:
+        # Create tabs for different views with on_change callback
+        tab_names = ["📊 Overview", "🔗 Chain Analysis", "👥 Resources", "🔍 Search & Filter"]
+
+        # Use radio buttons styled as tabs for better control
+        selected_tab = st.radio(
+            "Navigation",
+            options=range(len(tab_names)),
+            format_func=lambda x: tab_names[x],
+            index=st.session_state.active_tab,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="tab_selector"
+        )
+
+        st.session_state.active_tab = selected_tab
+
+        if selected_tab == 0:
             self.render_overview_tab()
-
-        with tab2:
+        elif selected_tab == 1:
             self.render_chain_analysis_tab()
-
-        with tab3:
+        elif selected_tab == 2:
             self.render_resources_tab()
-
-        with tab4:
+        elif selected_tab == 3:
             self.render_search_filter_tab()
 
     def render_overview_tab(self):
@@ -721,14 +783,32 @@ class CompleteOpportunityChainDB:
 
         with col1:
             st.subheader("📈 Opportunity Distribution")
+            st.caption("💡 Click any row to view its complete chain")
+
             # Top opportunities by value
             top_opps = self.opportunity_summary.nlargest(10, 'TCV USD').copy()
             top_opps['TCV USD (M)'] = top_opps['TCV USD'].apply(self.format_currency_millions)
-            st.dataframe(
+
+            # Display as interactive dataframe
+            event = st.dataframe(
                 top_opps[['HPE Opportunity Id', 'Opportunity Name', 'Product Line Code', 'Product Line Description', 'TCV USD (M)']],
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="overview_opportunities_table"
             )
+
+            # Check if a row was selected
+            if event.selection and event.selection.rows:
+                selected_row_idx = event.selection.rows[0]
+                # Get the actual dataframe index
+                selected_opp_id = top_opps.iloc[selected_row_idx]['HPE Opportunity Id']
+
+                # Store selected opportunity and switch to Chain Analysis tab
+                st.session_state.selected_opportunity_id = selected_opp_id
+                st.session_state.active_tab = 1
+                st.rerun()
 
         with col2:
             st.subheader("🎯 Product Line Summary")
@@ -789,7 +869,7 @@ class CompleteOpportunityChainDB:
         with coverage_col1:
             mapped_opps = sum(
                 1 for _, data in self.opportunity_to_pl.items()
-                if data['pl_code'] in self.pl_mapping
+                if any(pl_code in self.pl_mapping for pl_code in data['pl_codes'])
             )
             coverage = (
                 (mapped_opps / self.total_opportunities) * 100
@@ -806,8 +886,45 @@ class CompleteOpportunityChainDB:
             skillsets_count = sum(len(skillsets) for skillsets in self.service_to_skillsets.values())
             st.metric("Total Skillsets Identified", skillsets_count)
 
+    def get_filtered_chain(self, opportunity_id, selected_services=None, selected_skillsets=None, selected_skills=None):
+        """Get chain with cascading filters applied"""
+        # Get the base chain
+        chain = self.get_complete_chain(opportunity_id)
+        if not chain:
+            return None
+
+        # Apply cascading filters
+        if selected_services:
+            # Filter to selected services only
+            chain['services'] = [s for s in chain['services'] if s in selected_services]
+
+            # Cascade: Update skillsets based on selected services
+            chain['skillsets'] = set()
+            for service in chain['services']:
+                chain['skillsets'].update(self.service_to_skillsets.get(service, set()))
+            chain['skillsets'] = list(chain['skillsets'])
+
+        if selected_skillsets:
+            # Filter to selected skillsets only
+            chain['skillsets'] = [s for s in chain['skillsets'] if s in selected_skillsets]
+
+            # Cascade: Update skills based on selected skillsets
+            chain['skills'] = set()
+            for skillset in chain['skillsets']:
+                chain['skills'].update(self.skillset_to_skills.get(skillset, set()))
+            chain['skills'] = list(chain['skills'])
+
+        if selected_skills:
+            # Filter to selected skills only
+            chain['skills'] = [s for s in chain['skills'] if s in selected_skills]
+
+            # Cascade: Update resources based on selected skills using helper method
+            chain['resources'] = self.calculate_matching_resources(chain['skills'], limit=30)
+
+        return chain
+
     def render_chain_analysis_tab(self):
-        """Render the Chain Analysis tab"""
+        """Render the Chain Analysis tab with cascading filters"""
         st.header("🔗 Opportunity Chain Analysis")
 
         # Opportunity selector
@@ -827,20 +944,94 @@ class CompleteOpportunityChainDB:
             st.warning("Opportunities exist, but none meet the selection criteria.")
             return
 
+        # Determine default index based on pre-selected opportunity from Overview
+        default_index = 0
+        if 'selected_opportunity_id' in st.session_state:
+            # Find the index of the pre-selected opportunity
+            for idx, (label, opp_id) in enumerate(opp_options.items()):
+                if opp_id == st.session_state.selected_opportunity_id:
+                    default_index = idx
+                    break
+            # Clear the selected opportunity from session state after using it
+            del st.session_state.selected_opportunity_id
+
         selected = st.selectbox(
             "Choose an opportunity to explore the complete chain",
-            options=list(opp_options.keys())
+            options=list(opp_options.keys()),
+            index=default_index,
+            key="opp_selector"
         )
 
         if selected:
             opp_id = opp_options[selected]
-            chain = self.get_complete_chain(opp_id)
 
-            if chain:
-                # Display the chain steps
+            # Initialize session state for this opportunity if changed
+            if 'current_opp_id' not in st.session_state or st.session_state.current_opp_id != opp_id:
+                st.session_state.current_opp_id = opp_id
+                st.session_state.selected_services = []
+                st.session_state.selected_skillsets = []
+                st.session_state.selected_skills = []
+
+            # Get the base chain (unfiltered)
+            base_chain = self.get_complete_chain(opp_id)
+
+            if base_chain:
+                # Display the chain steps - COMPACT 6-COLUMN LAYOUT
                 st.header("📊 Chain Analysis")
 
-                # Step indicators
+                # Initialize session state with all PLs selected by default
+                if 'selected_pls' not in st.session_state or st.session_state.get('current_opp_id') != opp_id:
+                    st.session_state.selected_pls = base_chain['product_lines']
+
+                # Calculate cascading data
+                # Services from selected PLs
+                available_services = set()
+                for pl_code in st.session_state.selected_pls:
+                    available_services.update(self.pl_to_services.get(pl_code, set()))
+                available_services = sorted(list(available_services))
+
+                # Skillsets from selected services (or all if none selected)
+                if st.session_state.selected_services:
+                    available_skillsets = set()
+                    for service in st.session_state.selected_services:
+                        available_skillsets.update(self.service_to_skillsets.get(service, set()))
+                    available_skillsets = sorted(list(available_skillsets))
+                else:
+                    available_skillsets = set()
+                    for service in available_services:
+                        available_skillsets.update(self.service_to_skillsets.get(service, set()))
+                    available_skillsets = sorted(list(available_skillsets))
+
+                # Skills from selected skillsets (or all if none selected)
+                if st.session_state.selected_skillsets:
+                    available_skills = set()
+                    for skillset in st.session_state.selected_skillsets:
+                        available_skills.update(self.skillset_to_skills.get(skillset, set()))
+                    available_skills = sorted(list(available_skills))
+                else:
+                    available_skills = set()
+                    for skillset in available_skillsets:
+                        available_skills.update(self.skillset_to_skills.get(skillset, set()))
+                    available_skills = sorted(list(available_skills))
+
+                # Resources from selected skills - IMPORTANT: Actually filter!
+                if st.session_state.selected_skills:
+                    # Filter to only resources with selected skills
+                    skills_to_match = set(st.session_state.selected_skills)
+                elif st.session_state.selected_skillsets:
+                    # Use skills from selected skillsets
+                    skills_to_match = set(available_skills)
+                elif st.session_state.selected_services:
+                    # Use skills from selected services
+                    skills_to_match = set(available_skills)
+                else:
+                    # Use all skills from selected PLs
+                    skills_to_match = set(available_skills)
+
+                # Calculate matching resources using helper method
+                matched_resources = self.calculate_matching_resources(list(skills_to_match), limit=30)
+
+                # COMPACT 6-STEP HEADER ROW
                 steps = st.columns(6)
 
                 with steps[0]:
@@ -850,23 +1041,28 @@ class CompleteOpportunityChainDB:
                     </div>
                     """, unsafe_allow_html=True)
                     st.info(opp_id)
-                    st.caption(chain['opportunity']['opportunity_name'][:40])
+                    st.caption(base_chain['opportunity']['opportunity_name'][:40])
 
                 with steps[1]:
                     st.markdown("""
                     <div class="chain-flow">
-                    2️⃣ PL Code | Description
+                    2️⃣ Product Lines
                     </div>
                     """, unsafe_allow_html=True)
-                    # Display both code and description side-by-side
-                    pl_code = chain['opportunity'].get('pl_code', chain['product_line'])
-                    pl_full = chain['opportunity'].get('pl_full', chain['product_line'])
-                    # Extract description if available
-                    if ' - ' in str(pl_full):
-                        pl_desc = str(pl_full).split(' - ')[1].strip()
-                        st.info(f"{pl_code} | {pl_desc}")
-                    else:
-                        st.info(pl_code)
+                    pl_fulls = base_chain['opportunity'].get('pl_fulls', base_chain['product_lines'])
+
+                    # Interactive dropdown for PLs
+                    with st.popover(f"{len(st.session_state.selected_pls)} PL{'s' if len(st.session_state.selected_pls) > 1 else ''}", use_container_width=True):
+                        pl_options = {f"{pl_code} - {pl_full.split(' - ')[1] if ' - ' in pl_full else pl_code}": pl_code
+                                      for pl_code, pl_full in zip(base_chain['product_lines'], pl_fulls)}
+
+                        selected_pl_labels = st.multiselect(
+                            f"Select PLs ({len(base_chain['product_lines'])} total)",
+                            options=list(pl_options.keys()),
+                            default=[k for k, v in pl_options.items() if v in st.session_state.selected_pls],
+                            key="pl_multiselect"
+                        )
+                        st.session_state.selected_pls = [pl_options[label] for label in selected_pl_labels] if selected_pl_labels else base_chain['product_lines']
 
                 with steps[2]:
                     st.markdown("""
@@ -874,15 +1070,14 @@ class CompleteOpportunityChainDB:
                     3️⃣ Services
                     </div>
                     """, unsafe_allow_html=True)
-                    # Create info box style for popover trigger
-                    services_button = st.empty()
-                    with services_button:
-                        with st.popover(f"{len(chain['services'])} services", use_container_width=True):
-                            st.markdown("**Services Required:**")
-                            for idx, service in enumerate(chain['services'][:10], 1):
-                                st.write(f"{idx}. {service}")
-                            if len(chain['services']) > 10:
-                                st.caption(f"+ {len(chain['services']) - 10} more services")
+
+                    with st.popover(f"{len(available_services)} services", use_container_width=True):
+                        st.session_state.selected_services = st.multiselect(
+                            f"Select Services ({len(available_services)} from PLs)",
+                            options=available_services,
+                            default=st.session_state.selected_services if st.session_state.selected_services else [],
+                            key="services_multiselect"
+                        )
 
                 with steps[3]:
                     st.markdown("""
@@ -890,12 +1085,14 @@ class CompleteOpportunityChainDB:
                     4️⃣ Skillsets
                     </div>
                     """, unsafe_allow_html=True)
-                    with st.popover(f"{len(chain['skillsets'])} skillsets", use_container_width=True):
-                        st.markdown("**Skillsets Required:**")
-                        for idx, skillset in enumerate(chain['skillsets'][:10], 1):
-                            st.write(f"{idx}. {skillset}")
-                        if len(chain['skillsets']) > 10:
-                            st.caption(f"+ {len(chain['skillsets']) - 10} more skillsets")
+
+                    with st.popover(f"{len(available_skillsets)} skillsets", use_container_width=True):
+                        st.session_state.selected_skillsets = st.multiselect(
+                            f"Select Skillsets ({len(available_skillsets)} from services)",
+                            options=available_skillsets,
+                            default=st.session_state.selected_skillsets if st.session_state.selected_skillsets else [],
+                            key="skillsets_multiselect"
+                        )
 
                 with steps[4]:
                     st.markdown("""
@@ -903,14 +1100,14 @@ class CompleteOpportunityChainDB:
                     5️⃣ Skills
                     </div>
                     """, unsafe_allow_html=True)
-                    with st.popover(f"{len(chain['skills'])} skills", use_container_width=True):
-                        st.markdown("**Skills Required:**")
-                        # Group skills and show with resource counts
-                        for idx, skill in enumerate(chain['skills'][:15], 1):
-                            resource_count = len(self.skill_to_resources.get(skill, []))
-                            st.write(f"{idx}. {skill[:50]} ({resource_count} resources)")
-                        if len(chain['skills']) > 15:
-                            st.caption(f"+ {len(chain['skills']) - 15} more skills")
+
+                    with st.popover(f"{len(available_skills)} skills", use_container_width=True):
+                        st.session_state.selected_skills = st.multiselect(
+                            f"Select Skills ({len(available_skills)} from skillsets)",
+                            options=available_skills,
+                            default=st.session_state.selected_skills if st.session_state.selected_skills else [],
+                            key="skills_multiselect"
+                        )
 
                 with steps[5]:
                     st.markdown("""
@@ -918,15 +1115,26 @@ class CompleteOpportunityChainDB:
                     6️⃣ Resources
                     </div>
                     """, unsafe_allow_html=True)
-                    with st.popover(f"{len(chain['resources'])} matched", use_container_width=True):
-                        st.markdown("**Top Matched Resources:**")
-                        for idx, (resource_name, resource_data) in enumerate(list(chain['resources'].items())[:10], 1):
-                            profile = self.employee_profiles.get(resource_name, {})
-                            location = profile.get('location', 'Unknown')
-                            match_count = resource_data['count']
-                            st.write(f"{idx}. **{resource_name}** ({location}) - {match_count} skills")
-                        if len(chain['resources']) > 10:
-                            st.caption(f"+ {len(chain['resources']) - 10} more resources")
+                    st.caption(f"{len(matched_resources)} matched")
+
+                # Reset button
+                if st.session_state.selected_pls != base_chain['product_lines'] or st.session_state.selected_services or st.session_state.selected_skillsets or st.session_state.selected_skills:
+                    if st.button("🔄 Reset All Filters"):
+                        st.session_state.selected_pls = base_chain['product_lines']
+                        st.session_state.selected_services = []
+                        st.session_state.selected_skillsets = []
+                        st.session_state.selected_skills = []
+                        st.rerun()
+
+                # Build the final chain object for downstream use
+                chain = {
+                    'opportunity': base_chain['opportunity'],
+                    'product_lines': st.session_state.selected_pls,
+                    'services': st.session_state.selected_services if st.session_state.selected_services else available_services,
+                    'skillsets': st.session_state.selected_skillsets if st.session_state.selected_skillsets else available_skillsets,
+                    'skills': st.session_state.selected_skills if st.session_state.selected_skills else available_skills,
+                    'resources': matched_resources
+                }
 
                 # Visualization
                 st.header("🔗 Chain Visualization")
