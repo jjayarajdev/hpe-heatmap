@@ -958,6 +958,7 @@ class CompleteOpportunityChain:
                             avail = hash(resource_name) % 3
                             status = ["🟢 Available", "🔴 Busy", "🟡 Partial"][avail]
                             st.markdown(status)
+                            st.caption('<span style="font-size: 8px; color: #999;">mock</span>', unsafe_allow_html=True)
 
                 else:
                     st.warning("No matching resources found for this opportunity")
