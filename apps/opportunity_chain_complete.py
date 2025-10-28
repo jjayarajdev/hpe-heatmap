@@ -1156,56 +1156,150 @@ class CompleteOpportunityChain:
         if search_type == "Opportunities":
             st.subheader("Search Opportunities")
 
+            # Create three columns for filters
             col1, col2 = st.columns(2)
             with col1:
+                opp_id_search = st.text_input("Opportunity ID contains:", placeholder="OPE-XX16XXXX41")
                 opp_search = st.text_input("Opportunity name contains:", placeholder="Enter keywords...")
             with col2:
-                pl_filter = st.selectbox("Product Line", ["All"] + self.opportunity_summary['Product Line'].unique().tolist())
+                pl_filter = st.selectbox("Product Line", ["All"] + sorted(self.opportunity_summary['Product Line'].unique().tolist()))
+
+                # Add Sales Stage filter
+                sales_stages = ["All"] + sorted([str(stage) for stage in self.opportunity_summary['Sales Stage'].unique() if pd.notna(stage)])
+                sales_stage_filter = st.selectbox("Sales Stage", sales_stages)
 
             # Apply filters
             filtered = self.opportunity_summary.copy()
+
+            # Filter by Opportunity ID
+            if opp_id_search:
+                filtered = filtered[filtered['HPE Opportunity Id'].str.contains(opp_id_search, case=False, na=False)]
+
+            # Filter by Opportunity name
             if opp_search:
                 filtered = filtered[filtered['Opportunity Name'].str.contains(opp_search, case=False, na=False)]
+
+            # Filter by Product Line
             if pl_filter != "All":
                 filtered = filtered[filtered['Product Line'] == pl_filter]
+
+            # Filter by Sales Stage
+            if sales_stage_filter != "All":
+                filtered = filtered[filtered['Sales Stage'] == sales_stage_filter]
 
             st.write(f"Found {len(filtered)} opportunities")
             if len(filtered) > 0:
                 filtered_display = filtered.head(50).copy()
                 filtered_display['TCV USD (M)'] = filtered_display['TCV USD'].apply(self.format_currency_millions)
                 st.dataframe(filtered_display[['HPE Opportunity Id', 'Opportunity Name', 'Product Line Code', 'Product Line Description',
-                                      'TCV USD (M)']],
+                                      'Sales Stage', 'TCV USD (M)']],
                             use_container_width=True, hide_index=True)
 
         elif search_type == "Services":
             st.subheader("Search Services")
-            service_search = st.text_input("Service name contains:", placeholder="Enter keywords...")
 
-            all_services = set()
-            for services in self.pl_to_services.values():
-                all_services.update(services)
+            col1, col2 = st.columns(2)
+            with col1:
+                service_search = st.text_input("Service name contains:", placeholder="Enter keywords...")
+            with col2:
+                # Get unique Product Line Codes for filtering - MULTI-SELECT
+                pl_codes = sorted(list(set(self.opportunity_summary['Product Line Code'].unique())))
+                pl_filter_services = st.multiselect(
+                    "Filter by Product Line (select one or more)",
+                    options=pl_codes,
+                    default=[],
+                    key="pl_filter_services",
+                    help="Select multiple PLs to see services from all selected lines"
+                )
 
+            # Get services based on PL filter - SUPPORT MULTIPLE PLs
+            if pl_filter_services:  # If any PLs selected
+                all_services = set()
+                for pl_code in pl_filter_services:
+                    all_services.update(self.pl_to_services.get(pl_code, set()))
+            else:  # No PLs selected = show all
+                all_services = set()
+                for services in self.pl_to_services.values():
+                    all_services.update(services)
+
+            # Apply search filter
             if service_search:
                 matching = [s for s in all_services if service_search.lower() in s.lower()]
-                st.write(f"Found {len(matching)} services")
-                for service in matching[:20]:
-                    skillsets = self.service_to_skillsets.get(service, set())
-                    st.write(f"• **{service}** ({len(skillsets)} skillsets)")
             else:
-                st.info("Enter a search term to find services")
+                matching = list(all_services)
+
+            # Display result count with PL context
+            if pl_filter_services:
+                st.write(f"Found {len(matching)} services for PL: {', '.join(pl_filter_services)}")
+            else:
+                st.write(f"Found {len(matching)} services (all PLs)")
+
+            if matching:
+                for service in sorted(matching)[:50]:
+                    skillsets = self.service_to_skillsets.get(service, set())
+                    # Show which PLs this service belongs to
+                    service_pls = self.service_to_pl.get(service, set())
+                    pl_display = ", ".join(sorted(service_pls)[:3]) if service_pls else "N/A"
+                    st.write(f"• **{service}** ({len(skillsets)} skillsets) - PL: {pl_display}")
+            else:
+                st.info("No services found matching your criteria")
 
         elif search_type == "Skills":
             st.subheader("Search Skills")
-            skill_search = st.text_input("Skill name contains:", placeholder="Enter keywords...")
 
+            col1, col2 = st.columns(2)
+            with col1:
+                skill_search = st.text_input("Skill name contains:", placeholder="Enter keywords...")
+            with col2:
+                # Product Line filter for cascading - MULTI-SELECT
+                pl_codes = sorted(list(set(self.opportunity_summary['Product Line Code'].unique())))
+                pl_filter_skills = st.multiselect(
+                    "Filter by Product Line (select one or more)",
+                    options=pl_codes,
+                    default=[],
+                    key="pl_filter_skills",
+                    help="Select multiple PLs to see skills from all selected lines"
+                )
+
+            # Get skills based on PL filter (cascading through services -> skillsets -> skills) - SUPPORT MULTIPLE PLs
+            if pl_filter_skills:  # If any PLs selected
+                all_skills = set()
+                for pl_code in pl_filter_skills:
+                    # Get services for this PL
+                    services_for_pl = self.pl_to_services.get(pl_code, set())
+                    # Get skillsets for these services
+                    skillsets_for_pl = set()
+                    for service in services_for_pl:
+                        skillsets_for_pl.update(self.service_to_skillsets.get(service, set()))
+                    # Get skills for these skillsets
+                    for skillset in skillsets_for_pl:
+                        all_skills.update(self.skillset_to_skills.get(skillset, set()))
+            else:  # No PLs selected = show all skills
+                all_skills = set(self.skill_to_resources.keys())
+
+            # Apply search filter
             if skill_search:
-                matching = [(skill, resources) for skill, resources in self.skill_to_resources.items()
+                matching = [(skill, self.skill_to_resources.get(skill, [])) for skill in all_skills
                           if skill_search.lower() in skill.lower()]
-                st.write(f"Found {len(matching)} skills")
-                for skill, resources in matching[:20]:
-                    st.write(f"• **{skill[:60]}** ({len(resources)} resources)")
             else:
-                st.info("Enter a search term to find skills")
+                matching = [(skill, self.skill_to_resources.get(skill, [])) for skill in all_skills]
+
+            # Display result count with PL context
+            if pl_filter_skills:
+                st.write(f"Found {len(matching)} skills for PL: {', '.join(pl_filter_skills)}")
+            else:
+                st.write(f"Found {len(matching)} skills (all PLs)")
+
+            if matching:
+                # Sort by number of resources (descending)
+                matching.sort(key=lambda x: len(x[1]), reverse=True)
+                for skill, resources in matching[:50]:
+                    # Show skillsets this skill belongs to
+                    skillsets = self.skill_to_skillsets.get(skill, set())
+                    skillset_display = ", ".join(sorted(list(skillsets))[:2]) if skillsets else "N/A"
+                    st.write(f"• **{skill[:60]}** ({len(resources)} resources) - Skillsets: {skillset_display}")
+            else:
+                st.info("No skills found matching your criteria")
 
         elif search_type == "Resources":
             st.subheader("Search Resources")
@@ -1217,26 +1311,88 @@ class CompleteOpportunityChain:
                     ["All"] + sorted(list(set(p.get('location', 'Unknown') for p in self.employee_profiles.values()))))
             with col2:
                 skill_search = st.text_input("Has skill:", placeholder="Enter skill...")
+                # Product Line filter for cascading - MULTI-SELECT
+                pl_codes = sorted(list(set(self.opportunity_summary['Product Line Code'].unique())))
+                pl_filter_resources = st.multiselect(
+                    "Filter by Product Line (select one or more)",
+                    options=pl_codes,
+                    default=[],
+                    key="pl_filter_resources",
+                    help="Select multiple PLs to see resources from all selected lines"
+                )
+
+            col3, col4 = st.columns(2)
+            with col3:
                 min_skills = st.number_input("Minimum skills", min_value=0, value=0)
+
+            # Get relevant skills based on PL filter - SUPPORT MULTIPLE PLs
+            if pl_filter_resources:  # If any PLs selected
+                relevant_skills = set()
+                for pl_code in pl_filter_resources:
+                    # Get services for this PL
+                    services_for_pl = self.pl_to_services.get(pl_code, set())
+                    # Get skillsets for these services
+                    skillsets_for_pl = set()
+                    for service in services_for_pl:
+                        skillsets_for_pl.update(self.service_to_skillsets.get(service, set()))
+                    # Get skills for these skillsets
+                    for skillset in skillsets_for_pl:
+                        relevant_skills.update(self.skillset_to_skills.get(skillset, set()))
+            else:
+                relevant_skills = None  # No PL filter, consider all skills
 
             # Apply filters
             matching = []
             for name, profile in self.employee_profiles.items():
+                # Name filter
                 if name_search and name_search.lower() not in name.lower():
                     continue
+
+                # Location filter
                 if location_filter != "All" and profile.get('location') != location_filter:
                     continue
+
+                # Skill search filter
                 if skill_search:
                     skills_text = " ".join([s['skill'] for s in profile['skills']])
                     if skill_search.lower() not in skills_text.lower():
                         continue
+
+                # Minimum skills filter
                 if len(profile['skills']) < min_skills:
                     continue
-                matching.append((name, profile))
 
-            st.write(f"Found {len(matching)} resources")
-            for name, profile in matching[:20]:
-                st.write(f"• **{name}** - {profile.get('location', 'Unknown')} ({len(profile['skills'])} skills)")
+                # Product Line filter (check if resource has skills relevant to the PL)
+                if relevant_skills is not None:
+                    resource_skills = set([s['skill'] for s in profile['skills']])
+                    matching_pl_skills = resource_skills.intersection(relevant_skills)
+                    if not matching_pl_skills:
+                        continue
+                    # Store matching skill count for display
+                    pl_match_count = len(matching_pl_skills)
+                else:
+                    pl_match_count = 0
+
+                matching.append((name, profile, pl_match_count))
+
+            # Display result count with PL context
+            if pl_filter_resources:
+                st.write(f"Found {len(matching)} resources for PL: {', '.join(pl_filter_resources)}")
+            else:
+                st.write(f"Found {len(matching)} resources (all PLs)")
+
+            if matching:
+                # Sort by PL match count if filtering by PL, otherwise by total skills
+                if pl_filter_resources:
+                    matching.sort(key=lambda x: x[2], reverse=True)
+
+                for name, profile, pl_match_count in matching[:50]:
+                    if pl_filter_resources:
+                        st.write(f"• **{name}** - {profile.get('location', 'Unknown')} ({len(profile['skills'])} total skills, {pl_match_count} matching PL)")
+                    else:
+                        st.write(f"• **{name}** - {profile.get('location', 'Unknown')} ({len(profile['skills'])} skills)")
+            else:
+                st.info("No resources found matching your criteria")
 
 
 # Main execution
