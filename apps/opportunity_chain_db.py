@@ -325,7 +325,11 @@ class CompleteOpportunityChainDB:
             reverse=True
         )
 
-        return dict(sorted_resources[:limit])
+        # Apply limit if specified, otherwise return all
+        if limit is not None:
+            return dict(sorted_resources[:limit])
+        else:
+            return dict(sorted_resources)
 
     def create_pl_mapping(self):
         """Create mapping between opportunity PLs and service PLs"""
@@ -965,23 +969,20 @@ class CompleteOpportunityChainDB:
         if selected:
             opp_id = opp_options[selected]
 
-            # Initialize session state for this opportunity if changed
-            if 'current_opp_id' not in st.session_state or st.session_state.current_opp_id != opp_id:
-                st.session_state.current_opp_id = opp_id
-                st.session_state.selected_services = []
-                st.session_state.selected_skillsets = []
-                st.session_state.selected_skills = []
-
-            # Get the base chain (unfiltered)
+            # Get the base chain (unfiltered) first to have PL data
             base_chain = self.get_complete_chain(opp_id)
 
             if base_chain:
+                # Initialize session state for this opportunity if changed - BEFORE any widgets
+                if 'current_opp_id' not in st.session_state or st.session_state.current_opp_id != opp_id:
+                    st.session_state.current_opp_id = opp_id
+                    st.session_state.selected_pls = base_chain['product_lines']  # Reset to all PLs for new opportunity
+                    st.session_state.selected_services = []
+                    st.session_state.selected_skillsets = []
+                    st.session_state.selected_skills = []
+
                 # Display the chain steps - COMPACT 6-COLUMN LAYOUT
                 st.header("📊 Chain Analysis")
-
-                # Initialize session state with all PLs selected by default
-                if 'selected_pls' not in st.session_state or st.session_state.get('current_opp_id') != opp_id:
-                    st.session_state.selected_pls = base_chain['product_lines']
 
                 # Calculate cascading data
                 # Services from selected PLs
@@ -989,6 +990,9 @@ class CompleteOpportunityChainDB:
                 for pl_code in st.session_state.selected_pls:
                     available_services.update(self.pl_to_services.get(pl_code, set()))
                 available_services = sorted(list(available_services))
+
+                # Clean up selected_services - remove any that are no longer available
+                st.session_state.selected_services = [s for s in st.session_state.selected_services if s in available_services]
 
                 # Skillsets from selected services (or all if none selected)
                 if st.session_state.selected_services:
@@ -1002,6 +1006,9 @@ class CompleteOpportunityChainDB:
                         available_skillsets.update(self.service_to_skillsets.get(service, set()))
                     available_skillsets = sorted(list(available_skillsets))
 
+                # Clean up selected_skillsets - remove any that are no longer available
+                st.session_state.selected_skillsets = [s for s in st.session_state.selected_skillsets if s in available_skillsets]
+
                 # Skills from selected skillsets (or all if none selected)
                 if st.session_state.selected_skillsets:
                     available_skills = set()
@@ -1014,22 +1021,8 @@ class CompleteOpportunityChainDB:
                         available_skills.update(self.skillset_to_skills.get(skillset, set()))
                     available_skills = sorted(list(available_skills))
 
-                # Resources from selected skills - IMPORTANT: Actually filter!
-                if st.session_state.selected_skills:
-                    # Filter to only resources with selected skills
-                    skills_to_match = set(st.session_state.selected_skills)
-                elif st.session_state.selected_skillsets:
-                    # Use skills from selected skillsets
-                    skills_to_match = set(available_skills)
-                elif st.session_state.selected_services:
-                    # Use skills from selected services
-                    skills_to_match = set(available_skills)
-                else:
-                    # Use all skills from selected PLs
-                    skills_to_match = set(available_skills)
-
-                # Calculate matching resources using helper method
-                matched_resources = self.calculate_matching_resources(list(skills_to_match), limit=30)
+                # Clean up selected_skills - remove any that are no longer available
+                st.session_state.selected_skills = [s for s in st.session_state.selected_skills if s in available_skills]
 
                 # COMPACT 6-STEP HEADER ROW
                 steps = st.columns(6)
@@ -1051,18 +1044,44 @@ class CompleteOpportunityChainDB:
                     """, unsafe_allow_html=True)
                     pl_fulls = base_chain['opportunity'].get('pl_fulls', base_chain['product_lines'])
 
-                    # Interactive dropdown for PLs
-                    with st.popover(f"{len(st.session_state.selected_pls)} PL{'s' if len(st.session_state.selected_pls) > 1 else ''}", use_container_width=True):
+                    # Interactive dropdown for PLs with CHECKBOXES
+                    with st.popover(f"{len(st.session_state.selected_pls)} PL{'s' if len(st.session_state.selected_pls) > 1 else ''} selected", use_container_width=True):
+                        st.markdown(f"**Select Product Lines** ({len(base_chain['product_lines'])} total)")
+
+                        # Select All / Deselect All buttons
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            if st.button("✅ Select All", key=f"pl_select_all_{opp_id}", use_container_width=True):
+                                st.session_state.selected_pls = base_chain['product_lines'].copy()
+                                st.rerun()
+                        with col_btn2:
+                            if st.button("❌ Deselect All", key=f"pl_deselect_all_{opp_id}", use_container_width=True):
+                                st.session_state.selected_pls = []
+                                st.rerun()
+
+                        st.divider()
+
+                        # Checkboxes for each PL
                         pl_options = {f"{pl_code} - {pl_full.split(' - ')[1] if ' - ' in pl_full else pl_code}": pl_code
                                       for pl_code, pl_full in zip(base_chain['product_lines'], pl_fulls)}
 
-                        selected_pl_labels = st.multiselect(
-                            f"Select PLs ({len(base_chain['product_lines'])} total)",
-                            options=list(pl_options.keys()),
-                            default=[k for k, v in pl_options.items() if v in st.session_state.selected_pls],
-                            key="pl_multiselect"
-                        )
-                        st.session_state.selected_pls = [pl_options[label] for label in selected_pl_labels] if selected_pl_labels else base_chain['product_lines']
+                        # Track if any changes were made
+                        pl_changed = False
+                        for label, pl_code in pl_options.items():
+                            is_selected = pl_code in st.session_state.selected_pls
+                            checkbox_value = st.checkbox(label, value=is_selected, key=f"pl_cb_{pl_code}_{opp_id}")
+
+                            # Update session state and track changes
+                            if checkbox_value and pl_code not in st.session_state.selected_pls:
+                                st.session_state.selected_pls.append(pl_code)
+                                pl_changed = True
+                            elif not checkbox_value and pl_code in st.session_state.selected_pls:
+                                st.session_state.selected_pls.remove(pl_code)
+                                pl_changed = True
+
+                        # Rerun if changes were made to update the button text
+                        if pl_changed:
+                            st.rerun()
 
                 with steps[2]:
                     st.markdown("""
@@ -1071,13 +1090,48 @@ class CompleteOpportunityChainDB:
                     </div>
                     """, unsafe_allow_html=True)
 
-                    with st.popover(f"{len(available_services)} services", use_container_width=True):
-                        st.session_state.selected_services = st.multiselect(
-                            f"Select Services ({len(available_services)} from PLs)",
-                            options=available_services,
-                            default=st.session_state.selected_services if st.session_state.selected_services else [],
-                            key="services_multiselect"
-                        )
+                    with st.popover(f"{len(st.session_state.selected_services) if st.session_state.selected_services else 0} selected", use_container_width=True):
+                        st.markdown(f"**Select Services** ({len(available_services)} from PLs)")
+
+                        # Select All / Deselect All buttons
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            if st.button("✅ Select All", key=f"svc_select_all_{opp_id}", use_container_width=True):
+                                st.session_state.selected_services = available_services.copy()
+                                st.rerun()
+                        with col_btn2:
+                            if st.button("❌ Deselect All", key=f"svc_deselect_all_{opp_id}", use_container_width=True):
+                                st.session_state.selected_services = []
+                                st.rerun()
+
+                        st.divider()
+
+                        # Search box for filtering services
+                        service_filter = st.text_input("Filter services:", key=f"svc_filter_{opp_id}", placeholder="Type to filter...")
+
+                        # Checkboxes for each service (with filtering)
+                        filtered_services = [s for s in available_services if not service_filter or service_filter.lower() in s.lower()]
+
+                        if len(filtered_services) > 0:
+                            svc_changed = False
+                            for service in filtered_services[:30]:  # Limit display to 30
+                                is_selected = service in st.session_state.selected_services
+                                checkbox_value = st.checkbox(service[:60], value=is_selected, key=f"svc_cb_{service}_{opp_id}")
+
+                                if checkbox_value and service not in st.session_state.selected_services:
+                                    st.session_state.selected_services.append(service)
+                                    svc_changed = True
+                                elif not checkbox_value and service in st.session_state.selected_services:
+                                    st.session_state.selected_services.remove(service)
+                                    svc_changed = True
+
+                            if len(filtered_services) > 30:
+                                st.caption(f"Showing first 30 of {len(filtered_services)} services. Use filter to narrow down.")
+
+                            if svc_changed:
+                                st.rerun()
+                        else:
+                            st.info("No services match your filter")
 
                 with steps[3]:
                     st.markdown("""
@@ -1086,13 +1140,48 @@ class CompleteOpportunityChainDB:
                     </div>
                     """, unsafe_allow_html=True)
 
-                    with st.popover(f"{len(available_skillsets)} skillsets", use_container_width=True):
-                        st.session_state.selected_skillsets = st.multiselect(
-                            f"Select Skillsets ({len(available_skillsets)} from services)",
-                            options=available_skillsets,
-                            default=st.session_state.selected_skillsets if st.session_state.selected_skillsets else [],
-                            key="skillsets_multiselect"
-                        )
+                    with st.popover(f"{len(st.session_state.selected_skillsets) if st.session_state.selected_skillsets else 0} selected", use_container_width=True):
+                        st.markdown(f"**Select Skillsets** ({len(available_skillsets)} from services)")
+
+                        # Select All / Deselect All buttons
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            if st.button("✅ Select All", key=f"ss_select_all_{opp_id}", use_container_width=True):
+                                st.session_state.selected_skillsets = available_skillsets.copy()
+                                st.rerun()
+                        with col_btn2:
+                            if st.button("❌ Deselect All", key=f"ss_deselect_all_{opp_id}", use_container_width=True):
+                                st.session_state.selected_skillsets = []
+                                st.rerun()
+
+                        st.divider()
+
+                        # Search box for filtering skillsets
+                        skillset_filter = st.text_input("Filter skillsets:", key=f"ss_filter_{opp_id}", placeholder="Type to filter...")
+
+                        # Checkboxes for each skillset (with filtering)
+                        filtered_skillsets = [s for s in available_skillsets if not skillset_filter or skillset_filter.lower() in s.lower()]
+
+                        if len(filtered_skillsets) > 0:
+                            ss_changed = False
+                            for skillset in filtered_skillsets[:30]:  # Limit display to 30
+                                is_selected = skillset in st.session_state.selected_skillsets
+                                checkbox_value = st.checkbox(skillset[:60], value=is_selected, key=f"ss_cb_{skillset}_{opp_id}")
+
+                                if checkbox_value and skillset not in st.session_state.selected_skillsets:
+                                    st.session_state.selected_skillsets.append(skillset)
+                                    ss_changed = True
+                                elif not checkbox_value and skillset in st.session_state.selected_skillsets:
+                                    st.session_state.selected_skillsets.remove(skillset)
+                                    ss_changed = True
+
+                            if len(filtered_skillsets) > 30:
+                                st.caption(f"Showing first 30 of {len(filtered_skillsets)} skillsets. Use filter to narrow down.")
+
+                            if ss_changed:
+                                st.rerun()
+                        else:
+                            st.info("No skillsets match your filter")
 
                 with steps[4]:
                     st.markdown("""
@@ -1101,13 +1190,50 @@ class CompleteOpportunityChainDB:
                     </div>
                     """, unsafe_allow_html=True)
 
-                    with st.popover(f"{len(available_skills)} skills", use_container_width=True):
-                        st.session_state.selected_skills = st.multiselect(
-                            f"Select Skills ({len(available_skills)} from skillsets)",
-                            options=available_skills,
-                            default=st.session_state.selected_skills if st.session_state.selected_skills else [],
-                            key="skills_multiselect"
-                        )
+                    with st.popover(f"{len(st.session_state.selected_skills) if st.session_state.selected_skills else 0} selected", use_container_width=True):
+                        st.markdown(f"**Select Skills** ({len(available_skills)} from skillsets)")
+
+                        # Select All / Deselect All buttons
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            if st.button("✅ Select All", key=f"sk_select_all_{opp_id}", use_container_width=True):
+                                st.session_state.selected_skills = available_skills.copy()
+                                st.rerun()
+                        with col_btn2:
+                            if st.button("❌ Deselect All", key=f"sk_deselect_all_{opp_id}", use_container_width=True):
+                                st.session_state.selected_skills = []
+                                st.rerun()
+
+                        st.divider()
+
+                        # Search box for filtering skills
+                        skill_filter = st.text_input("Filter skills:", key=f"sk_filter_{opp_id}", placeholder="Type to filter...")
+
+                        # Checkboxes for each skill (with filtering)
+                        filtered_skills = [s for s in available_skills if not skill_filter or skill_filter.lower() in s.lower()]
+
+                        if len(filtered_skills) > 0:
+                            sk_changed = False
+                            for skill in filtered_skills[:30]:  # Limit display to 30
+                                is_selected = skill in st.session_state.selected_skills
+                                resource_count = len(self.skill_to_resources.get(skill, []))
+                                label = f"{skill[:50]} ({resource_count} resources)"
+                                checkbox_value = st.checkbox(label, value=is_selected, key=f"sk_cb_{skill}_{opp_id}")
+
+                                if checkbox_value and skill not in st.session_state.selected_skills:
+                                    st.session_state.selected_skills.append(skill)
+                                    sk_changed = True
+                                elif not checkbox_value and skill in st.session_state.selected_skills:
+                                    st.session_state.selected_skills.remove(skill)
+                                    sk_changed = True
+
+                            if len(filtered_skills) > 30:
+                                st.caption(f"Showing first 30 of {len(filtered_skills)} skills. Use filter to narrow down.")
+
+                            if sk_changed:
+                                st.rerun()
+                        else:
+                            st.info("No skills match your filter")
 
                 with steps[5]:
                     st.markdown("""
@@ -1115,6 +1241,25 @@ class CompleteOpportunityChainDB:
                     6️⃣ Resources
                     </div>
                     """, unsafe_allow_html=True)
+
+                    # Calculate resources AFTER all checkbox interactions
+                    # Determine which skills to match against
+                    if st.session_state.selected_skills:
+                        # Filter to only resources with selected skills
+                        skills_to_match = set(st.session_state.selected_skills)
+                    elif st.session_state.selected_skillsets:
+                        # Use skills from selected skillsets
+                        skills_to_match = set(available_skills)
+                    elif st.session_state.selected_services:
+                        # Use skills from selected services
+                        skills_to_match = set(available_skills)
+                    else:
+                        # Use all skills from selected PLs
+                        skills_to_match = set(available_skills)
+
+                    # Calculate matching resources using helper method - NO LIMIT for accurate count
+                    matched_resources = self.calculate_matching_resources(list(skills_to_match), limit=None)
+
                     st.caption(f"{len(matched_resources)} matched")
 
                 # Reset button
@@ -1374,56 +1519,150 @@ class CompleteOpportunityChainDB:
         if search_type == "Opportunities":
             st.subheader("Search Opportunities")
 
+            # Create three columns for filters
             col1, col2 = st.columns(2)
             with col1:
+                opp_id_search = st.text_input("Opportunity ID contains:", placeholder="OPE-XX16XXXX41")
                 opp_search = st.text_input("Opportunity name contains:", placeholder="Enter keywords...")
             with col2:
-                pl_filter = st.selectbox("Product Line", ["All"] + self.opportunity_summary['Product Line'].unique().tolist())
+                pl_filter = st.selectbox("Product Line", ["All"] + sorted(self.opportunity_summary['Product Line'].unique().tolist()))
+
+                # Add Sales Stage filter
+                sales_stages = ["All"] + sorted([str(stage) for stage in self.opportunity_summary['Sales Stage'].unique() if pd.notna(stage)])
+                sales_stage_filter = st.selectbox("Sales Stage", sales_stages)
 
             # Apply filters
             filtered = self.opportunity_summary.copy()
+
+            # Filter by Opportunity ID
+            if opp_id_search:
+                filtered = filtered[filtered['HPE Opportunity Id'].str.contains(opp_id_search, case=False, na=False)]
+
+            # Filter by Opportunity name
             if opp_search:
                 filtered = filtered[filtered['Opportunity Name'].str.contains(opp_search, case=False, na=False)]
+
+            # Filter by Product Line
             if pl_filter != "All":
                 filtered = filtered[filtered['Product Line'] == pl_filter]
+
+            # Filter by Sales Stage
+            if sales_stage_filter != "All":
+                filtered = filtered[filtered['Sales Stage'] == sales_stage_filter]
 
             st.write(f"Found {len(filtered)} opportunities")
             if len(filtered) > 0:
                 filtered_display = filtered.head(50).copy()
                 filtered_display['TCV USD (M)'] = filtered_display['TCV USD'].apply(self.format_currency_millions)
                 st.dataframe(filtered_display[['HPE Opportunity Id', 'Opportunity Name', 'Product Line Code', 'Product Line Description',
-                                      'TCV USD (M)']],
+                                      'Sales Stage', 'TCV USD (M)']],
                             use_container_width=True, hide_index=True)
 
         elif search_type == "Services":
             st.subheader("Search Services")
-            service_search = st.text_input("Service name contains:", placeholder="Enter keywords...")
 
-            all_services = set()
-            for services in self.pl_to_services.values():
-                all_services.update(services)
+            col1, col2 = st.columns(2)
+            with col1:
+                service_search = st.text_input("Service name contains:", placeholder="Enter keywords...")
+            with col2:
+                # Get unique Product Line Codes for filtering - MULTI-SELECT
+                pl_codes = sorted(list(set(self.opportunity_summary['Product Line Code'].unique())))
+                pl_filter_services = st.multiselect(
+                    "Filter by Product Line (select one or more)",
+                    options=pl_codes,
+                    default=[],
+                    key="pl_filter_services",
+                    help="Select multiple PLs to see services from all selected lines"
+                )
 
+            # Get services based on PL filter - SUPPORT MULTIPLE PLs
+            if pl_filter_services:  # If any PLs selected
+                all_services = set()
+                for pl_code in pl_filter_services:
+                    all_services.update(self.pl_to_services.get(pl_code, set()))
+            else:  # No PLs selected = show all
+                all_services = set()
+                for services in self.pl_to_services.values():
+                    all_services.update(services)
+
+            # Apply search filter
             if service_search:
                 matching = [s for s in all_services if service_search.lower() in s.lower()]
-                st.write(f"Found {len(matching)} services")
-                for service in matching[:20]:
-                    skillsets = self.service_to_skillsets.get(service, set())
-                    st.write(f"• **{service}** ({len(skillsets)} skillsets)")
             else:
-                st.info("Enter a search term to find services")
+                matching = list(all_services)
+
+            # Display result count with PL context
+            if pl_filter_services:
+                st.write(f"Found {len(matching)} services for PL: {', '.join(pl_filter_services)}")
+            else:
+                st.write(f"Found {len(matching)} services (all PLs)")
+
+            if matching:
+                for service in sorted(matching)[:50]:
+                    skillsets = self.service_to_skillsets.get(service, set())
+                    # Show which PLs this service belongs to
+                    service_pls = self.service_to_pl.get(service, set())
+                    pl_display = ", ".join(sorted(service_pls)[:3]) if service_pls else "N/A"
+                    st.write(f"• **{service}** ({len(skillsets)} skillsets) - PL: {pl_display}")
+            else:
+                st.info("No services found matching your criteria")
 
         elif search_type == "Skills":
             st.subheader("Search Skills")
-            skill_search = st.text_input("Skill name contains:", placeholder="Enter keywords...")
 
+            col1, col2 = st.columns(2)
+            with col1:
+                skill_search = st.text_input("Skill name contains:", placeholder="Enter keywords...")
+            with col2:
+                # Product Line filter for cascading - MULTI-SELECT
+                pl_codes = sorted(list(set(self.opportunity_summary['Product Line Code'].unique())))
+                pl_filter_skills = st.multiselect(
+                    "Filter by Product Line (select one or more)",
+                    options=pl_codes,
+                    default=[],
+                    key="pl_filter_skills",
+                    help="Select multiple PLs to see skills from all selected lines"
+                )
+
+            # Get skills based on PL filter (cascading through services -> skillsets -> skills) - SUPPORT MULTIPLE PLs
+            if pl_filter_skills:  # If any PLs selected
+                all_skills = set()
+                for pl_code in pl_filter_skills:
+                    # Get services for this PL
+                    services_for_pl = self.pl_to_services.get(pl_code, set())
+                    # Get skillsets for these services
+                    skillsets_for_pl = set()
+                    for service in services_for_pl:
+                        skillsets_for_pl.update(self.service_to_skillsets.get(service, set()))
+                    # Get skills for these skillsets
+                    for skillset in skillsets_for_pl:
+                        all_skills.update(self.skillset_to_skills.get(skillset, set()))
+            else:  # No PLs selected = show all skills
+                all_skills = set(self.skill_to_resources.keys())
+
+            # Apply search filter
             if skill_search:
-                matching = [(skill, resources) for skill, resources in self.skill_to_resources.items()
+                matching = [(skill, self.skill_to_resources.get(skill, [])) for skill in all_skills
                           if skill_search.lower() in skill.lower()]
-                st.write(f"Found {len(matching)} skills")
-                for skill, resources in matching[:20]:
-                    st.write(f"• **{skill[:60]}** ({len(resources)} resources)")
             else:
-                st.info("Enter a search term to find skills")
+                matching = [(skill, self.skill_to_resources.get(skill, [])) for skill in all_skills]
+
+            # Display result count with PL context
+            if pl_filter_skills:
+                st.write(f"Found {len(matching)} skills for PL: {', '.join(pl_filter_skills)}")
+            else:
+                st.write(f"Found {len(matching)} skills (all PLs)")
+
+            if matching:
+                # Sort by number of resources (descending)
+                matching.sort(key=lambda x: len(x[1]), reverse=True)
+                for skill, resources in matching[:50]:
+                    # Show skillsets this skill belongs to
+                    skillsets = self.skill_to_skillsets.get(skill, set())
+                    skillset_display = ", ".join(sorted(list(skillsets))[:2]) if skillsets else "N/A"
+                    st.write(f"• **{skill[:60]}** ({len(resources)} resources) - Skillsets: {skillset_display}")
+            else:
+                st.info("No skills found matching your criteria")
 
         elif search_type == "Resources":
             st.subheader("Search Resources")
@@ -1435,26 +1674,88 @@ class CompleteOpportunityChainDB:
                     ["All"] + sorted(list(set(p.get('location', 'Unknown') for p in self.employee_profiles.values()))))
             with col2:
                 skill_search = st.text_input("Has skill:", placeholder="Enter skill...")
+                # Product Line filter for cascading - MULTI-SELECT
+                pl_codes = sorted(list(set(self.opportunity_summary['Product Line Code'].unique())))
+                pl_filter_resources = st.multiselect(
+                    "Filter by Product Line (select one or more)",
+                    options=pl_codes,
+                    default=[],
+                    key="pl_filter_resources",
+                    help="Select multiple PLs to see resources from all selected lines"
+                )
+
+            col3, col4 = st.columns(2)
+            with col3:
                 min_skills = st.number_input("Minimum skills", min_value=0, value=0)
+
+            # Get relevant skills based on PL filter - SUPPORT MULTIPLE PLs
+            if pl_filter_resources:  # If any PLs selected
+                relevant_skills = set()
+                for pl_code in pl_filter_resources:
+                    # Get services for this PL
+                    services_for_pl = self.pl_to_services.get(pl_code, set())
+                    # Get skillsets for these services
+                    skillsets_for_pl = set()
+                    for service in services_for_pl:
+                        skillsets_for_pl.update(self.service_to_skillsets.get(service, set()))
+                    # Get skills for these skillsets
+                    for skillset in skillsets_for_pl:
+                        relevant_skills.update(self.skillset_to_skills.get(skillset, set()))
+            else:
+                relevant_skills = None  # No PL filter, consider all skills
 
             # Apply filters
             matching = []
             for name, profile in self.employee_profiles.items():
+                # Name filter
                 if name_search and name_search.lower() not in name.lower():
                     continue
+
+                # Location filter
                 if location_filter != "All" and profile.get('location') != location_filter:
                     continue
+
+                # Skill search filter
                 if skill_search:
                     skills_text = " ".join([s['skill'] for s in profile['skills']])
                     if skill_search.lower() not in skills_text.lower():
                         continue
+
+                # Minimum skills filter
                 if len(profile['skills']) < min_skills:
                     continue
-                matching.append((name, profile))
 
-            st.write(f"Found {len(matching)} resources")
-            for name, profile in matching[:20]:
-                st.write(f"• **{name}** - {profile.get('location', 'Unknown')} ({len(profile['skills'])} skills)")
+                # Product Line filter (check if resource has skills relevant to the PL)
+                if relevant_skills is not None:
+                    resource_skills = set([s['skill'] for s in profile['skills']])
+                    matching_pl_skills = resource_skills.intersection(relevant_skills)
+                    if not matching_pl_skills:
+                        continue
+                    # Store matching skill count for display
+                    pl_match_count = len(matching_pl_skills)
+                else:
+                    pl_match_count = 0
+
+                matching.append((name, profile, pl_match_count))
+
+            # Display result count with PL context
+            if pl_filter_resources:
+                st.write(f"Found {len(matching)} resources for PL: {', '.join(pl_filter_resources)}")
+            else:
+                st.write(f"Found {len(matching)} resources (all PLs)")
+
+            if matching:
+                # Sort by PL match count if filtering by PL, otherwise by total skills
+                if pl_filter_resources:
+                    matching.sort(key=lambda x: x[2], reverse=True)
+
+                for name, profile, pl_match_count in matching[:50]:
+                    if pl_filter_resources:
+                        st.write(f"• **{name}** - {profile.get('location', 'Unknown')} ({len(profile['skills'])} total skills, {pl_match_count} matching PL)")
+                    else:
+                        st.write(f"• **{name}** - {profile.get('location', 'Unknown')} ({len(profile['skills'])} skills)")
+            else:
+                st.info("No resources found matching your criteria")
 
 
 # Main execution
