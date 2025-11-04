@@ -767,7 +767,10 @@ class CompleteOpportunityChainDB:
             key="tab_selector"
         )
 
-        st.session_state.active_tab = selected_tab
+        # Only update session state if the radio selection differs from current state
+        # This prevents overwriting programmatic tab changes from row selections
+        if selected_tab != st.session_state.active_tab:
+            st.session_state.active_tab = selected_tab
 
         if selected_tab == 0:
             self.render_overview_tab()
@@ -789,30 +792,93 @@ class CompleteOpportunityChainDB:
             st.subheader("📈 Opportunity Distribution")
             st.caption("💡 Click any row to view its complete chain")
 
-            # Top opportunities by value
-            top_opps = self.opportunity_summary.nlargest(10, 'TCV USD').copy()
-            top_opps['TCV USD (M)'] = top_opps['TCV USD'].apply(self.format_currency_millions)
+            # Add filters
+            with st.expander("🔍 Filter Opportunities", expanded=False):
+                filter_col1, filter_col2 = st.columns(2)
 
-            # Display as interactive dataframe
-            event = st.dataframe(
-                top_opps[['HPE Opportunity Id', 'Opportunity Name', 'Product Line Code', 'Product Line Description', 'TCV USD (M)']],
-                use_container_width=True,
-                hide_index=True,
-                on_select="rerun",
-                selection_mode="single-row",
-                key="overview_opportunities_table"
-            )
+                with filter_col1:
+                    opp_id_filter = st.text_input(
+                        "Opportunity ID contains:",
+                        key="overview_opp_id_filter",
+                        placeholder="e.g., OPE-XX16"
+                    )
+                    opp_name_filter = st.text_input(
+                        "Opportunity Name contains:",
+                        key="overview_opp_name_filter",
+                        placeholder="e.g., Digital Transformation"
+                    )
 
-            # Check if a row was selected
-            if event.selection and event.selection.rows:
-                selected_row_idx = event.selection.rows[0]
-                # Get the actual dataframe index
-                selected_opp_id = top_opps.iloc[selected_row_idx]['HPE Opportunity Id']
+                with filter_col2:
+                    # Get unique values for dropdowns
+                    sales_stages = ["All"] + sorted([str(s) for s in self.opportunity_summary['Sales Stage'].unique() if pd.notna(s)])
+                    sales_stage_filter = st.selectbox(
+                        "Sales Stage:",
+                        sales_stages,
+                        key="overview_sales_stage_filter"
+                    )
 
-                # Store selected opportunity and switch to Chain Analysis tab
-                st.session_state.selected_opportunity_id = selected_opp_id
-                st.session_state.active_tab = 1
-                st.rerun()
+                    forecast_categories = ["All"] + sorted([str(f) for f in self.opportunity_summary['Forecast Category'].unique() if pd.notna(f)])
+                    forecast_filter = st.selectbox(
+                        "Forecast Category:",
+                        forecast_categories,
+                        key="overview_forecast_filter"
+                    )
+
+            # Apply filters
+            filtered_opps = self.opportunity_summary.copy()
+
+            if opp_id_filter:
+                filtered_opps = filtered_opps[
+                    filtered_opps['HPE Opportunity Id'].str.contains(opp_id_filter, case=False, na=False)
+                ]
+
+            if opp_name_filter:
+                filtered_opps = filtered_opps[
+                    filtered_opps['Opportunity Name'].str.contains(opp_name_filter, case=False, na=False)
+                ]
+
+            if sales_stage_filter != "All":
+                filtered_opps = filtered_opps[
+                    filtered_opps['Sales Stage'] == sales_stage_filter
+                ]
+
+            if forecast_filter != "All":
+                filtered_opps = filtered_opps[
+                    filtered_opps['Forecast Category'] == forecast_filter
+                ]
+
+            # Show filter results count
+            if opp_id_filter or opp_name_filter or sales_stage_filter != "All" or forecast_filter != "All":
+                st.info(f"📊 Found {len(filtered_opps)} opportunities matching filters (showing top 10 by value)")
+
+            # Top opportunities by value (from filtered set)
+            top_opps = filtered_opps.nlargest(10, 'TCV USD').copy() if len(filtered_opps) > 0 else filtered_opps.copy()
+
+            if len(top_opps) > 0:
+                top_opps['TCV USD (M)'] = top_opps['TCV USD'].apply(self.format_currency_millions)
+
+                # Display as interactive dataframe
+                event = st.dataframe(
+                    top_opps[['HPE Opportunity Id', 'Opportunity Name', 'Product Line Code', 'Product Line Description', 'TCV USD (M)']],
+                    use_container_width=True,
+                    hide_index=True,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key="overview_opportunities_table"
+                )
+
+                # Check if a row was selected
+                if event.selection and event.selection.rows:
+                    selected_row_idx = event.selection.rows[0]
+                    # Get the actual dataframe index
+                    selected_opp_id = top_opps.iloc[selected_row_idx]['HPE Opportunity Id']
+
+                    # Store selected opportunity and switch to Chain Analysis tab
+                    st.session_state.selected_opportunity_id = selected_opp_id
+                    st.session_state.active_tab = 1
+                    st.rerun()
+            else:
+                st.warning("⚠️ No opportunities match the selected filters")
 
         with col2:
             st.subheader("🎯 Product Line Summary")
@@ -1090,7 +1156,9 @@ class CompleteOpportunityChainDB:
                     </div>
                     """, unsafe_allow_html=True)
 
-                    with st.popover(f"{len(st.session_state.selected_services) if st.session_state.selected_services else 0} selected", use_container_width=True):
+                    # Show count: if nothing selected, show total available; otherwise show selected count
+                    services_display = f"{len(available_services)} available" if not st.session_state.selected_services else f"{len(st.session_state.selected_services)} selected"
+                    with st.popover(services_display, use_container_width=True):
                         st.markdown(f"**Select Services** ({len(available_services)} from PLs)")
 
                         # Select All / Deselect All buttons
@@ -1140,7 +1208,9 @@ class CompleteOpportunityChainDB:
                     </div>
                     """, unsafe_allow_html=True)
 
-                    with st.popover(f"{len(st.session_state.selected_skillsets) if st.session_state.selected_skillsets else 0} selected", use_container_width=True):
+                    # Show count: if nothing selected, show total available; otherwise show selected count
+                    skillsets_display = f"{len(available_skillsets)} available" if not st.session_state.selected_skillsets else f"{len(st.session_state.selected_skillsets)} selected"
+                    with st.popover(skillsets_display, use_container_width=True):
                         st.markdown(f"**Select Skillsets** ({len(available_skillsets)} from services)")
 
                         # Select All / Deselect All buttons
@@ -1190,7 +1260,9 @@ class CompleteOpportunityChainDB:
                     </div>
                     """, unsafe_allow_html=True)
 
-                    with st.popover(f"{len(st.session_state.selected_skills) if st.session_state.selected_skills else 0} selected", use_container_width=True):
+                    # Show count: if nothing selected, show total available; otherwise show selected count
+                    skills_display = f"{len(available_skills)} available" if not st.session_state.selected_skills else f"{len(st.session_state.selected_skills)} selected"
+                    with st.popover(skills_display, use_container_width=True):
                         st.markdown(f"**Select Skills** ({len(available_skills)} from skillsets)")
 
                         # Select All / Deselect All buttons
@@ -1302,16 +1374,25 @@ class CompleteOpportunityChainDB:
                             if st.button(f"👤 {resource_name}", key=f"res_{resource_name}"):
                                 self.render_resource_detail(resource_name)
 
-                            # Show top skills
-                            top_skills = ", ".join([s['skill'][:20] for s in resource_data['skills'][:3]])
+                            # Show top skills with details
+                            matching_skills = resource_data['skills']
+                            top_skills = ", ".join([s['skill'][:20] for s in matching_skills[:3]])
                             st.caption(f"Skills: {top_skills}...")
 
                         with col2:
-                            st.metric("Matches", resource_data['count'])
+                            st.metric(
+                                "Matches",
+                                resource_data['count'],
+                                help=f"Number of opportunity skills this resource possesses. {resource_name} has {resource_data['count']} out of {len(chain['skills'])} required skills ({(resource_data['count']/len(chain['skills'])*100):.1f}% match)"
+                            )
 
                         with col3:
                             max_rating = resource_data['max_rating']
-                            st.metric("Max Rating", f"{max_rating:.1f}")
+                            st.metric(
+                                "Max Rating",
+                                f"{max_rating:.1f}",
+                                help="Highest proficiency level among matched skills (0=Unrated, 1-2=Beginner/Intermediate, 3=Advanced, 4+=Expert)"
+                            )
 
                         with col4:
                             st.metric("Location", profile.get('location', 'Unknown'))
@@ -1321,6 +1402,7 @@ class CompleteOpportunityChainDB:
                             avail = hash(resource_name) % 3
                             status = ["🟢 Available", "🔴 Busy", "🟡 Partial"][avail]
                             st.markdown(status)
+                            st.caption('<span style="font-size: 8px; color: #999;">mock</span>', unsafe_allow_html=True)
 
                 else:
                     st.warning("No matching resources found for this opportunity")
@@ -1442,6 +1524,100 @@ class CompleteOpportunityChainDB:
         st.markdown("---")
 
         self.render_resource_opportunities(resource_name)
+
+    @st.dialog("📚 Resource Skills Profile", width="large")
+    def show_skills_modal(self, resource_name):
+        """Show all skills for a resource in a modal dialog"""
+        if resource_name not in self.employee_profiles:
+            st.error(f"Resource {resource_name} not found")
+            return
+
+        profile = self.employee_profiles[resource_name]
+
+        st.markdown(f"### 👤 {resource_name}")
+        st.markdown("---")
+
+        # Basic Information
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("📍 Location", profile.get('location', 'Unknown'))
+        with col2:
+            st.metric("👔 Manager", profile.get('manager', 'Unknown')[:20])
+        with col3:
+            st.metric("🏢 Domain", profile.get('domain', 'Unknown')[:20])
+        with col4:
+            st.metric("📊 Total Skills", len(profile['skills']))
+
+        st.markdown("---")
+
+        # Skills Summary Metrics
+        expert_skills = sum(1 for s in profile['skills'] if s['rating'] >= 4)
+        advanced_skills = sum(1 for s in profile['skills'] if s['rating'] == 3)
+        intermediate_skills = sum(1 for s in profile['skills'] if s['rating'] == 2)
+        beginner_skills = sum(1 for s in profile['skills'] if s['rating'] == 1)
+        unrated_skills = sum(1 for s in profile['skills'] if s['rating'] == 0)
+
+        metric_col1, metric_col2, metric_col3, metric_col4, metric_col5 = st.columns(5)
+
+        with metric_col1:
+            st.metric("🌟 Expert", expert_skills)
+        with metric_col2:
+            st.metric("⭐ Advanced", advanced_skills)
+        with metric_col3:
+            st.metric("📘 Intermediate", intermediate_skills)
+        with metric_col4:
+            st.metric("📗 Beginner", beginner_skills)
+        with metric_col5:
+            st.metric("❓ Unrated", unrated_skills)
+
+        st.markdown("---")
+
+        # Display all skills grouped by rating
+        st.subheader("🎯 Complete Skills Profile")
+
+        # Group skills by rating
+        skills_by_rating = defaultdict(list)
+        for skill_info in profile['skills']:
+            rating = int(skill_info['rating']) if skill_info['rating'] > 0 else 0
+            skills_by_rating[rating].append(skill_info)
+
+        # Display skills by rating level in tabs
+        tab_labels = []
+        tab_data = []
+
+        for rating in [4, 3, 2, 1, 0]:
+            if rating in skills_by_rating:
+                rating_labels = {
+                    4: ("🌟 Expert", "#28a745"),
+                    3: ("⭐ Advanced", "#17a2b8"),
+                    2: ("📘 Intermediate", "#ffc107"),
+                    1: ("📗 Beginner", "#6c757d"),
+                    0: ("❓ Unrated", "#999999")
+                }
+                label, color = rating_labels[rating]
+                tab_labels.append(f"{label} ({len(skills_by_rating[rating])})")
+                tab_data.append((rating, color, skills_by_rating[rating]))
+
+        if tab_labels:
+            tabs = st.tabs(tab_labels)
+
+            for idx, (rating, color, skills) in enumerate(tab_data):
+                with tabs[idx]:
+                    # Display skills in a nice grid
+                    for skill_info in skills:
+                        rating_text = skill_info.get('rating_text', f"Level {skill_info['rating']}")
+                        skillset = skill_info.get('skillset', 'N/A')
+
+                        st.markdown(f"""
+                        <div style="background: {color}15; border-left: 4px solid {color}; padding: 12px; margin: 8px 0; border-radius: 4px;">
+                            <div style="font-size: 16px; font-weight: bold; color: #333;">{skill_info['skill']}</div>
+                            <div style="font-size: 12px; color: #666; margin-top: 4px;">
+                                <span style="color: {color}; font-weight: bold;">Rating: {rating_text}</span> |
+                                Skillset: {skillset[:50]}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
     def render_resource_opportunities(self, resource_name):
         """Find and display opportunities matching a resource's skills"""
@@ -1749,11 +1925,55 @@ class CompleteOpportunityChainDB:
                 if pl_filter_resources:
                     matching.sort(key=lambda x: x[2], reverse=True)
 
+                st.markdown("<br>", unsafe_allow_html=True)
+
                 for name, profile, pl_match_count in matching[:50]:
-                    if pl_filter_resources:
-                        st.write(f"• **{name}** - {profile.get('location', 'Unknown')} ({len(profile['skills'])} total skills, {pl_match_count} matching PL)")
+                    # Determine skill level indicator
+                    skill_count = len(profile['skills'])
+                    if skill_count >= 30:
+                        skill_badge = "🌟 Expert Level"
+                        badge_color = "#28a745"
+                    elif skill_count >= 20:
+                        skill_badge = "⭐ Advanced"
+                        badge_color = "#17a2b8"
+                    elif skill_count >= 10:
+                        skill_badge = "📘 Intermediate"
+                        badge_color = "#ffc107"
                     else:
-                        st.write(f"• **{name}** - {profile.get('location', 'Unknown')} ({len(profile['skills'])} skills)")
+                        skill_badge = "📗 Entry Level"
+                        badge_color = "#6c757d"
+
+                    # Resource card with hover effect styling
+                    if pl_filter_resources:
+                        match_info = f"<span style='color: {badge_color}; font-weight: bold;'>{pl_match_count} PL skills</span>"
+                    else:
+                        match_info = f"<span style='color: {badge_color}; font-weight: bold;'>{skill_badge}</span>"
+
+                    # Create clickable card
+                    if st.button(
+                        f"👤 {name}",
+                        key=f"skills_modal_{name}_{pl_match_count}",
+                        help=f"Click to view {name}'s complete skills profile",
+                        use_container_width=True
+                    ):
+                        self.show_skills_modal(name)
+
+                    # Display info below the button
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+                                border: 2px solid #e9ecef;
+                                border-left: 5px solid {badge_color};
+                                border-radius: 0 0 12px 12px;
+                                padding: 12px 20px;
+                                margin: -8px 0 16px 0;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                        <div style="font-size: 14px; color: #6c757d;">
+                            📍 {profile.get('location', 'Unknown')} •
+                            📊 {skill_count} skills •
+                            {match_info}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
             else:
                 st.info("No resources found matching your criteria")
 
