@@ -767,7 +767,10 @@ class CompleteOpportunityChainDB:
             key="tab_selector"
         )
 
-        st.session_state.active_tab = selected_tab
+        # Only update session state if the radio selection differs from current state
+        # This prevents overwriting programmatic tab changes from row selections
+        if selected_tab != st.session_state.active_tab:
+            st.session_state.active_tab = selected_tab
 
         if selected_tab == 0:
             self.render_overview_tab()
