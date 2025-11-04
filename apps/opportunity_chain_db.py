@@ -750,8 +750,8 @@ class CompleteOpportunityChainDB:
         st.divider()
 
         # Initialize session state for active tab if not exists
-        if 'active_tab' not in st.session_state:
-            st.session_state.active_tab = 0
+        if 'tab_selector' not in st.session_state:
+            st.session_state.tab_selector = 0
 
         # Create tabs for different views with on_change callback
         tab_names = ["📊 Overview", "🔗 Chain Analysis", "👥 Resources", "🔍 Search & Filter"]
@@ -761,16 +761,10 @@ class CompleteOpportunityChainDB:
             "Navigation",
             options=range(len(tab_names)),
             format_func=lambda x: tab_names[x],
-            index=st.session_state.active_tab,
             horizontal=True,
             label_visibility="collapsed",
             key="tab_selector"
         )
-
-        # Only update session state if the radio selection differs from current state
-        # This prevents overwriting programmatic tab changes from row selections
-        if selected_tab != st.session_state.active_tab:
-            st.session_state.active_tab = selected_tab
 
         if selected_tab == 0:
             self.render_overview_tab()
@@ -875,7 +869,7 @@ class CompleteOpportunityChainDB:
 
                     # Store selected opportunity and switch to Chain Analysis tab
                     st.session_state.selected_opportunity_id = selected_opp_id
-                    st.session_state.active_tab = 1
+                    st.session_state.tab_selector = 1  # Use tab_selector instead of active_tab
                     st.rerun()
             else:
                 st.warning("⚠️ No opportunities match the selected filters")
