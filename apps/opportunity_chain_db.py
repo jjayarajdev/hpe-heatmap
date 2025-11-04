@@ -749,6 +749,14 @@ class CompleteOpportunityChainDB:
 
         st.divider()
 
+        # Handle navigation requests from other tabs (e.g., row clicks)
+        # This must be done BEFORE the widget is created
+        if 'navigate_to_tab' in st.session_state:
+            target_tab = st.session_state.navigate_to_tab
+            del st.session_state.navigate_to_tab
+            # Force the widget to initialize with the target tab
+            st.session_state.tab_selector = target_tab
+
         # Initialize session state for active tab if not exists
         if 'tab_selector' not in st.session_state:
             st.session_state.tab_selector = 0
@@ -867,9 +875,9 @@ class CompleteOpportunityChainDB:
                     # Get the actual dataframe index
                     selected_opp_id = top_opps.iloc[selected_row_idx]['HPE Opportunity Id']
 
-                    # Store selected opportunity and switch to Chain Analysis tab
+                    # Store selected opportunity and request navigation to Chain Analysis tab
                     st.session_state.selected_opportunity_id = selected_opp_id
-                    st.session_state.tab_selector = 1  # Use tab_selector instead of active_tab
+                    st.session_state.navigate_to_tab = 1  # Request navigation (processed before widget creation)
                     st.rerun()
             else:
                 st.warning("⚠️ No opportunities match the selected filters")
